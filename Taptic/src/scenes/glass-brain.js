@@ -21,7 +21,12 @@ export function createGlassBrainScene(THREE, tensorBridge = null) {
         { name: 'conv2', color: 0x44ff88, label: 'Conv2' },
         { name: 'conv3', color: 0xff8844, label: 'Conv3' },
         { name: 'fc1', color: 0xff44ff, label: 'FC1' },
-        { name: 'fc2', color: 0xffff44, label: 'FC2' }
+        { name: 'fc2', color: 0xffff44, label: 'FC2' },
+        { name: 'sensory_input', color: 0x00ffff, label: 'Sensory' },
+        { name: 'motor_cortex', color: 0xff0066, label: 'Motor Cortex' },
+        { name: 'premotor', color: 0x66ff00, label: 'Premotor' },
+        { name: 'cerebellum', color: 0xff6600, label: 'Cerebellum' },
+        { name: 'basal_ganglia', color: 0x9900ff, label: 'Basal Ganglia' }
     ];
 
     layerConfigs.forEach((config, layerIndex) => {

@@ -4,7 +4,7 @@ import logging
 from enum import Enum
 from typing import Optional
 
-from hardware import ArmController, MagnetDriver, CalibrationManager
+from hardware import ArmController, MagnetDriver, CalibrationManager, PuppeteerController, IMUSensor, PuppeteerState
 from vision import CameraManager, CameraConfig, CameraRole, ArucoDetector
 from brain import InferencePipeline
 from logic import ChimpSortFSM, SortState, TetrisAgent
@@ -18,6 +18,7 @@ class Mode(Enum):
     CHIMP_SORT = "chimp"
     TETRIS = "tetris"
     CALIBRATE = "calibrate"
+    PUPPETEER = "puppeteer"
 
 
 class ALICE:
@@ -33,6 +34,7 @@ class ALICE:
         self.inference: Optional[InferencePipeline] = None
         self.sort_fsm: Optional[ChimpSortFSM] = None
         self.tetris: Optional[TetrisAgent] = None
+        self.puppeteer: Optional[PuppeteerController] = None
         
         self._running = False
         self._ws_server = None
@@ -70,6 +72,11 @@ class ALICE:
                 self.tetris = TetrisAgent()
                 self.tetris.on_action(self._on_tetris_action)
             
+            elif self.mode == Mode.PUPPETEER:
+                sensor = IMUSensor(simulate=self.simulate)
+                self.puppeteer = PuppeteerController(self.arm, sensor)
+                self.puppeteer.on_frame(self._on_puppeteer_frame)
+            
             logger.info("Initialization complete")
             return True
             
@@ -86,6 +93,9 @@ class ALICE:
     def _on_tetris_action(self, action) -> None:
         logger.debug(f"Tetris action: {action.name}")
     
+    def _on_puppeteer_frame(self, frame) -> None:
+        logger.debug(f"Arm angles: {[f'{a:.1f}' for a in frame.angles]}")
+    
     async def run(self) -> None:
         self._running = True
         logger.info("Starting main loop")
@@ -98,6 +108,8 @@ class ALICE:
             await self._run_tetris()
         elif self.mode == Mode.CALIBRATE:
             await self._run_calibration()
+        elif self.mode == Mode.PUPPETEER:
+            await self._run_puppeteer()
     
     async def _run_chimp_sort(self) -> None:
         self.sort_fsm.start_human_benchmark()
@@ -172,6 +184,62 @@ class ALICE:
         
         cv2.destroyAllWindows()
     
+    async def _run_puppeteer(self) -> None:
+        logger.info("Puppeteer mode - 'l' for live, 'r' to record, 'p' to playback, 'q' to quit")
+        
+        while self._running:
+            key_pressed = None
+            
+            try:
+                import msvcrt
+                if msvcrt.kbhit():
+                    key_pressed = msvcrt.getch().decode().lower()
+            except ImportError:
+                import sys, select
+                if select.select([sys.stdin], [], [], 0)[0]:
+                    key_pressed = sys.stdin.read(1).lower()
+            
+            if key_pressed == 'q':
+                break
+            elif key_pressed == 'l':
+                if self.puppeteer.state == PuppeteerState.IDLE:
+                    self.puppeteer.start_live()
+                    logger.info("LIVE mode - Your arm controls the robot!")
+                else:
+                    self.puppeteer.stop()
+                    logger.info("Stopped")
+            elif key_pressed == 'r':
+                if self.puppeteer.state == PuppeteerState.IDLE:
+                    self.puppeteer.start_recording()
+                    logger.info("RECORDING - Move your arm...")
+                elif self.puppeteer.state == PuppeteerState.RECORDING:
+                    recording = self.puppeteer.stop_recording()
+                    logger.info(f"Recorded {recording.frame_count} frames ({recording.duration:.1f}s)")
+            elif key_pressed == 'p':
+                if self.puppeteer.recording:
+                    self.puppeteer.start_playback()
+                    logger.info("PLAYBACK - Replaying recording...")
+            
+            if self.puppeteer.state != PuppeteerState.IDLE:
+                frame = self.puppeteer.update()
+                if frame:
+                    await self._broadcast_puppeteer_activations(frame)
+            
+            await asyncio.sleep(0.033)
+        
+        self.puppeteer.stop()
+    
+    async def _broadcast_puppeteer_activations(self, frame) -> None:
+        if not self._clients:
+            return
+        
+        data = self.puppeteer.get_websocket_payload(frame)
+        for client in self._clients.copy():
+            try:
+                await client.send(data)
+            except Exception:
+                self._clients.discard(client)
+    
     async def _broadcast_activations(self) -> None:
         if not self._clients:
             return
@@ -200,7 +268,7 @@ class ALICE:
 
 async def main():
     parser = argparse.ArgumentParser(description="A.L.I.C.E. - Adaptive Learning Interface for Cognitive Exploration")
-    parser.add_argument("--mode", type=str, choices=["chimp", "tetris", "calibrate"], default="tetris")
+    parser.add_argument("--mode", type=str, choices=["chimp", "tetris", "calibrate", "puppeteer"], default="tetris")
     parser.add_argument("--simulate", action="store_true", default=True)
     parser.add_argument("--ws-port", type=int, default=8765)
     args = parser.parse_args()
