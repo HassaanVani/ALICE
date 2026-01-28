@@ -17,6 +17,7 @@ import { createCustomModelScene } from './scenes/custom-model.js';
 import { createMoleculeMaker } from './scenes/molecule-maker.js';
 import { createGlassBrainScene } from './scenes/glass-brain.js';
 import { TensorBridge } from './tensor-bridge.js';
+import { PuppetBridge } from './puppet-bridge.js';
 
 class App {
     constructor() {
@@ -26,6 +27,8 @@ class App {
         this.currentScene = 'solar-system';
         this.tensorBridge = null;
         this.glassBrainScene = null;
+        this.puppetBridge = null;
+        this.puppetModeActive = false;
     }
 
     async init() {
@@ -107,8 +110,22 @@ class App {
                 }
             });
 
+        this.puppetBridge = new PuppetBridge();
+        this.puppetBridge
+            .onConnect(() => console.log('Puppet connected'))
+            .onArmUpdate((data) => {
+                if (this.puppetModeActive) {
+                    document.getElementById('gesture-text').textContent =
+                        `Arm: [${data.angles.map(a => a.toFixed(0)).join(', ')}]`;
+                }
+            });
+
         this.handTracker = new HandTracker(video, handCanvas, (landmarks) => {
             this.gestureController.processLandmarks(landmarks);
+
+            if (this.puppetModeActive && this.puppetBridge.connected) {
+                this.puppetBridge.updateLandmarks(landmarks);
+            }
         });
 
         try {
@@ -249,15 +266,16 @@ class App {
 
     setupKeyboardFallback() {
         let keys = {};
+        let prevKeys = {};
 
-        window.addEventListener('keydown', (e) => { keys[e.key] = true; });
-        window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+        window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
         const tick = () => {
-            if (keys['ArrowUp'] || keys['w']) this.sceneManager.zoom(0.5);
-            if (keys['ArrowDown'] || keys['s']) this.sceneManager.zoom(-0.5);
-            if (keys['ArrowLeft'] || keys['a']) this.sceneManager.rotate(-0.03, 0);
-            if (keys['ArrowRight'] || keys['d']) this.sceneManager.rotate(0.03, 0);
+            if (keys['arrowup'] || keys['w']) this.sceneManager.zoom(0.5);
+            if (keys['arrowdown'] || keys['s']) this.sceneManager.zoom(-0.5);
+            if (keys['arrowleft'] || keys['a']) this.sceneManager.rotate(-0.03, 0);
+            if (keys['arrowright'] || keys['d']) this.sceneManager.rotate(0.03, 0);
             if (keys['q']) this.sceneManager.rotate(0, -0.03);
             if (keys['e']) this.sceneManager.rotate(0, 0.03);
 
@@ -266,6 +284,34 @@ class App {
                 if (keys[']']) this.glassBrainScene.nextLayer();
             }
 
+            if (keys['p'] && !prevKeys['p']) {
+                this.puppetModeActive = !this.puppetModeActive;
+                if (this.puppetModeActive) {
+                    this.puppetBridge.connect();
+                    this.puppetBridge.startStreaming();
+                    document.getElementById('gesture-text').textContent = 'PUPPET MODE';
+                } else {
+                    this.puppetBridge.stopStreaming();
+                    this.puppetBridge.disconnect();
+                    document.getElementById('gesture-text').textContent = 'Tracking';
+                }
+            }
+
+            if (keys['t'] && !prevKeys['t'] && this.puppetModeActive) {
+                if (this.puppetBridge.connected) {
+                    if (!this._isTeaching) {
+                        this._isTeaching = true;
+                        this.puppetBridge.startTeaching('motion_' + Date.now());
+                        document.getElementById('gesture-text').textContent = 'TEACHING...';
+                    } else {
+                        this._isTeaching = false;
+                        this.puppetBridge.stopTeaching();
+                        document.getElementById('gesture-text').textContent = 'PUPPET MODE';
+                    }
+                }
+            }
+
+            prevKeys = { ...keys };
             requestAnimationFrame(tick);
         };
         tick();
