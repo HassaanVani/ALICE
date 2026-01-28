@@ -1,62 +1,188 @@
 import time
+from typing import List, Tuple, Optional, Callable
+from dataclasses import dataclass, field
+from enum import Enum
 
-class ChimpSorter:
-    def __init__(self, arm_controller):
-        self.arm = arm_controller
+from vision.aruco_detector import BlockData
 
-    def bubble_sort(self, blocks):
-        """
-        Sorts blocks physically using Bubble Sort logic.
-        blocks: List of objects with {'id': int, 'pos': (x,y)}
-        """
-        n = len(blocks)
-        for i in range(n):
-            for j in range(0, n - i - 1):
-                if blocks[j]['id'] > blocks[j + 1]['id']:
-                    # Virtual Swap
-                    blocks[j], blocks[j + 1] = blocks[j + 1], blocks[j]
-                    
-                    # Physical Swap Operation
-                    self._physical_swap(blocks[j], blocks[j+1])
-                    
-    def _physical_swap(self, block_a, block_b):
-        """
-        Execute the Pick-Place sequence to swap two blocks.
-        This is a complex operation involving a temp buffer zone.
-        """
-        print(f"Swapping Block {block_a['id']} <-> Block {block_b['id']}")
-        
-        # 1. Pick A -> Move to Temp
-        self.arm.move_to(block_a['pos'][0], block_a['pos'][1], 10)
-        self.arm.toggle_magnet(True)
-        self.arm.move_to(0, 0, 10) # Dummy Temp Zone
-        self.arm.toggle_magnet(False)
-        
-        # 2. Pick B -> Move to A's old pos
-        self.arm.move_to(block_b['pos'][0], block_b['pos'][1], 10)
-        self.arm.toggle_magnet(True)
-        self.arm.move_to(block_a['pos'][0], block_a['pos'][1], 10)
-        self.arm.toggle_magnet(False)
-        
-        # 3. Pick A (from Temp) -> Move to B's old pos
-        self.arm.move_to(0, 0, 10) # From Temp
-        self.arm.toggle_magnet(True)
-        self.arm.move_to(block_b['pos'][0], block_b['pos'][1], 10)
-        self.arm.toggle_magnet(False)
 
-if __name__ == "__main__":
-    # Test Stub
-    class MockArm:
-        def move_to(self, x, y, z): pass
-        def toggle_magnet(self, s): pass
+class SortState(Enum):
+    IDLE = "idle"
+    HUMAN_BENCHMARK = "human_benchmark"
+    GHOST_REPLAY = "ghost_replay"
+    CYBORG_COOP = "cyborg_coop"
+    COMPLETE = "complete"
+
+
+@dataclass
+class MoveRecord:
+    block_id: int
+    from_pos: Tuple[int, int]
+    to_pos: Tuple[int, int]
+    timestamp: float
+
+
+@dataclass
+class SortingSession:
+    start_time: float = 0.0
+    end_time: float = 0.0
+    moves: List[MoveRecord] = field(default_factory=list)
+    final_order: List[int] = field(default_factory=list)
     
-    sorter = ChimpSorter(MockArm())
+    @property
+    def duration(self) -> float:
+        return self.end_time - self.start_time if self.end_time else 0.0
     
-    test_blocks = [
-        {'id': 2, 'pos': (10, 10)},
-        {'id': 1, 'pos': (20, 10)}
-    ]
+    @property
+    def move_count(self) -> int:
+        return len(self.moves)
     
-    print("Before:", [b['id'] for b in test_blocks])
-    sorter.bubble_sort(test_blocks)
-    print("After:", [b['id'] for b in test_blocks])
+    @property
+    def efficiency_score(self) -> float:
+        optimal = 16
+        if self.move_count == 0:
+            return 0.0
+        return min(1.0, optimal / self.move_count)
+
+
+class ChimpSortFSM:
+    def __init__(self):
+        self._state = SortState.IDLE
+        self._session: Optional[SortingSession] = None
+        self._block_positions: dict[int, Tuple[int, int]] = {}
+        self._sorted_zone: Tuple[int, int, int, int] = (0, 0, 800, 100)
+        self._drop_zone: Tuple[int, int, int, int] = (800, 0, 200, 300)
+        self._on_state_change: Optional[Callable[[SortState], None]] = None
+        self._on_move: Optional[Callable[[MoveRecord], None]] = None
+    
+    @property
+    def state(self) -> SortState:
+        return self._state
+    
+    @property
+    def session(self) -> Optional[SortingSession]:
+        return self._session
+    
+    def on_state_change(self, callback: Callable[[SortState], None]) -> "ChimpSortFSM":
+        self._on_state_change = callback
+        return self
+    
+    def on_move(self, callback: Callable[[MoveRecord], None]) -> "ChimpSortFSM":
+        self._on_move = callback
+        return self
+    
+    def set_zones(self, sorted_zone: Tuple[int, int, int, int], drop_zone: Tuple[int, int, int, int]) -> None:
+        self._sorted_zone = sorted_zone
+        self._drop_zone = drop_zone
+    
+    def _transition(self, new_state: SortState) -> None:
+        if self._state != new_state:
+            self._state = new_state
+            if self._on_state_change:
+                self._on_state_change(new_state)
+    
+    def start_human_benchmark(self) -> None:
+        self._session = SortingSession(start_time=time.time())
+        self._block_positions.clear()
+        self._transition(SortState.HUMAN_BENCHMARK)
+    
+    def start_ghost_replay(self, session: Optional[SortingSession] = None) -> None:
+        if session:
+            self._session = session
+        self._transition(SortState.GHOST_REPLAY)
+    
+    def start_cyborg_coop(self) -> None:
+        self._session = SortingSession(start_time=time.time())
+        self._transition(SortState.CYBORG_COOP)
+    
+    def stop(self) -> Optional[SortingSession]:
+        if self._session:
+            self._session.end_time = time.time()
+        result = self._session
+        self._session = None
+        self._transition(SortState.IDLE)
+        return result
+    
+    def update(self, blocks: List[BlockData]) -> None:
+        if self._state == SortState.IDLE:
+            return
+        
+        for block in blocks:
+            pos = (block.center_x, block.center_y)
+            block_id = block.block_id
+            
+            if block_id in self._block_positions:
+                prev_pos = self._block_positions[block_id]
+                if self._significant_move(prev_pos, pos):
+                    move = MoveRecord(
+                        block_id=block_id,
+                        from_pos=prev_pos,
+                        to_pos=pos,
+                        timestamp=time.time()
+                    )
+                    if self._session:
+                        self._session.moves.append(move)
+                    if self._on_move:
+                        self._on_move(move)
+            
+            self._block_positions[block_id] = pos
+        
+        if self._check_sorted(blocks):
+            if self._session:
+                self._session.end_time = time.time()
+                self._session.final_order = [b.block_id for b in blocks]
+            self._transition(SortState.COMPLETE)
+    
+    def _significant_move(self, prev: Tuple[int, int], curr: Tuple[int, int], threshold: int = 30) -> bool:
+        return abs(prev[0] - curr[0]) > threshold or abs(prev[1] - curr[1]) > threshold
+    
+    def _check_sorted(self, blocks: List[BlockData]) -> bool:
+        if len(blocks) < 16:
+            return False
+        
+        ids = [b.block_id for b in sorted(blocks, key=lambda b: b.center_x)]
+        return ids == list(range(1, 17))
+    
+    def is_in_drop_zone(self, x: int, y: int) -> bool:
+        zx, zy, zw, zh = self._drop_zone
+        return zx <= x < zx + zw and zy <= y < zy + zh
+    
+    def is_in_sorted_zone(self, x: int, y: int) -> bool:
+        zx, zy, zw, zh = self._sorted_zone
+        return zx <= x < zx + zw and zy <= y < zy + zh
+    
+    def get_next_robot_target(self) -> Optional[Tuple[int, Tuple[int, int]]]:
+        if self._state != SortState.CYBORG_COOP:
+            return None
+        
+        for block_id, pos in self._block_positions.items():
+            if self.is_in_drop_zone(pos[0], pos[1]):
+                target_x = self._sorted_zone[0] + (block_id - 1) * 50
+                target_y = self._sorted_zone[1] + 50
+                return (block_id, (target_x, target_y))
+        
+        return None
+    
+    def get_ghost_replay_moves(self) -> List[MoveRecord]:
+        if not self._session:
+            return []
+        return list(self._session.moves)
+    
+    def compute_optimal_sort(self, blocks: List[BlockData]) -> List[Tuple[int, Tuple[int, int], Tuple[int, int]]]:
+        current = {b.block_id: (b.center_x, b.center_y) for b in blocks}
+        moves = []
+        
+        for target_id in range(1, 17):
+            if target_id not in current:
+                continue
+            
+            from_pos = current[target_id]
+            target_x = self._sorted_zone[0] + (target_id - 1) * 50
+            target_y = self._sorted_zone[1] + 50
+            to_pos = (target_x, target_y)
+            
+            if self._significant_move(from_pos, to_pos, threshold=10):
+                moves.append((target_id, from_pos, to_pos))
+                current[target_id] = to_pos
+        
+        return moves

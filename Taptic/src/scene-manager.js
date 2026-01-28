@@ -145,28 +145,6 @@ export class SceneManager {
         }
     }
 
-    updateBrainState(data) {
-        if (this.currentSceneName === 'brain' && this.currentScene?.setActivationLevel) {
-            // Aggregate activations to a simple scalar "activity level" for the demo
-            // In a real app, we'd map specific tensors to specific 3D coordinates.
-            let totalActivity = 0;
-            if (data.activations) {
-                // Sum up some values from the tensor arrays
-                for (const key in data.activations) {
-                    const tensor = data.activations[key];
-                    // tensor is a nested list, flatten and sum simple
-                    const flat = tensor.flat(Infinity);
-                    const layerSum = flat.reduce((a, b) => a + Math.abs(b), 0);
-                    totalActivity += layerSum;
-                }
-            }
-
-            // Normalize roughly (assuming dummy data magnitude)
-            const normalizedIntensity = totalActivity / 100.0;
-            this.currentScene.setActivationLevel('global', normalizedIntensity);
-        }
-    }
-
     handleResize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();

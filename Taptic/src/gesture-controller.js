@@ -60,6 +60,8 @@ export class GestureController {
     onRecenter(callback) { this.callbacks.onRecenter = callback; return this; }
     onGestureChange(callback) { this.callbacks.onGestureChange = callback; return this; }
     onCursor(callback) { this.callbacks.onCursor = callback; return this; }
+    onFreeze(callback) { this.callbacks.onFreeze = callback; return this; }
+    onLayerNav(callback) { this.callbacks.onLayerNav = callback; return this; }
 
     processLandmarks(landmarks) {
         if (!landmarks) {

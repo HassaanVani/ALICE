@@ -15,6 +15,8 @@ import { createUIDemo } from './scenes/ui-demo.js';
 import { createParticleRoom } from './scenes/particle-room.js';
 import { createCustomModelScene } from './scenes/custom-model.js';
 import { createMoleculeMaker } from './scenes/molecule-maker.js';
+import { createGlassBrainScene } from './scenes/glass-brain.js';
+import { TensorBridge } from './tensor-bridge.js';
 
 class App {
     constructor() {
@@ -22,6 +24,8 @@ class App {
         this.handTracker = null;
         this.gestureController = null;
         this.currentScene = 'solar-system';
+        this.tensorBridge = null;
+        this.glassBrainScene = null;
     }
 
     async init() {
@@ -45,6 +49,12 @@ class App {
         this.sceneManager.registerScene('ui-demo', createUIDemo);
         this.sceneManager.registerScene('particle-room', createParticleRoom);
         this.sceneManager.registerScene('molecule-maker', createMoleculeMaker);
+
+        this.tensorBridge = new TensorBridge();
+        this.sceneManager.registerScene('glass-brain', (THREE) => {
+            this.glassBrainScene = createGlassBrainScene(THREE, this.tensorBridge);
+            return this.glassBrainScene;
+        });
 
         this.gestureController = new GestureController();
         this.cursorData = { visible: false, clicking: false, x: 0, y: 0 };
@@ -125,39 +135,6 @@ class App {
         this.setupKeyboardFallback();
         this.setupControls();
         this.setupUpload();
-
-        // --- WEBSOCKET CONNECTION ---
-        this.connectToBrain();
-    }
-
-    connectToBrain() {
-        const ws = new WebSocket('ws://localhost:8765');
-
-        ws.onopen = () => {
-            console.log('Connected to A.L.I.C.E. Brain');
-            const gestureText = document.getElementById('gesture-text');
-            if (gestureText) gestureText.textContent = "Brain Connected";
-        };
-
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.type === 'brain_state') {
-                    this.sceneManager.updateBrainState(data);
-                }
-            } catch (e) {
-                console.error('Error parsing brain data', e);
-            }
-        };
-
-        ws.onclose = () => {
-            console.log('Disconnected from Brain. Retrying in 3s...');
-            setTimeout(() => this.connectToBrain(), 3000);
-        };
-
-        ws.onerror = (err) => {
-            console.log('Brain WS Error (Is main.py running?)');
-        };
     }
 
     resizeHandCanvas(video, canvas) {
@@ -196,6 +173,12 @@ class App {
 
                 const isInteractive = sceneName === 'ui-demo' || sceneName === 'particle-room' || sceneName === 'molecule-maker';
                 this.gestureController.setInteractiveMode(isInteractive);
+
+                if (sceneName === 'glass-brain') {
+                    this.tensorBridge.connect();
+                } else {
+                    this.tensorBridge.disconnect();
+                }
 
                 this.currentScene = sceneName;
                 await this.sceneManager.switchScene(sceneName);
@@ -277,6 +260,12 @@ class App {
             if (keys['ArrowRight'] || keys['d']) this.sceneManager.rotate(0.03, 0);
             if (keys['q']) this.sceneManager.rotate(0, -0.03);
             if (keys['e']) this.sceneManager.rotate(0, 0.03);
+
+            if (this.glassBrainScene) {
+                if (keys['[']) this.glassBrainScene.prevLayer();
+                if (keys[']']) this.glassBrainScene.nextLayer();
+            }
+
             requestAnimationFrame(tick);
         };
         tick();

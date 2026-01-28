@@ -1,6 +1,7 @@
-opencv-python
-numpy
-pyserial
-websockets
-torch
-torchvision
+opencv-python>=4.8.0
+numpy>=1.24.0
+pyserial>=3.5
+torch>=2.0.0
+torchvision>=0.15.0
+websockets>=11.0
+gymnasium>=0.29.0

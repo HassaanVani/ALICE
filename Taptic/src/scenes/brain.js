@@ -222,28 +222,9 @@ export function createBrainScene(THREE) {
         core.scale.setScalar(1 + Math.sin(elapsed * 1.2) * 0.05);
     };
 
-    const setActivationLevel = (layerName, intensity) => {
-        // Simple mapping: "conv1" lights up one region, "fc1" another.
-        // Or just global intensity for now.
-
-        const boost = Math.min(intensity, 2.0); // Cap intensity
-
-        neurons.forEach((neuron) => {
-            // Randomly boost some neurons based on intensity
-            if (Math.random() < 0.1 * boost) {
-                neuron.userData.isActive = true;
-                neuron.userData.pulseSpeed = 2 + boost * 2;
-            }
-        });
-
-        // Also boost core opacity
-        core.material.opacity = 0.05 + 0.1 * boost;
-    };
-
     return {
         scene,
         update,
-        setActivationLevel, // Exported function
         defaultDistance: 6,
         minDistance: 3,
         maxDistance: 15
