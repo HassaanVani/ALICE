@@ -69,45 +69,44 @@ class HookManager:
         arr = self.get_activation(layer_name)
         if arr is None:
             return None
-        
+
+        from scipy.ndimage import zoom
+
         if len(arr.shape) == 4:  # Conv layer: (B, C, H, W)
             data = arr[0]  # Take first batch
             c, h, w = data.shape
-            
+
             normalized = (data - data.min()) / (data.max() - data.min() + 1e-8)
-            mean_activation = normalized.mean(axis=0)
-            
-            from scipy.ndimage import zoom
+
+            # Resize all channels at once: (C, H, W) -> (C, res, res)
             scale_h = resolution / h
             scale_w = resolution / w
-            resized = zoom(mean_activation, (scale_h, scale_w), order=1)
-            
-            voxels = np.zeros((resolution, resolution, resolution))
+            all_resized = zoom(normalized, (1, scale_h, scale_w), order=1)
+
+            # Map channels into depth slices using broadcasting
+            n_channels = min(c, resolution)
             depth_per_channel = max(1, resolution // c)
-            
-            for ch in range(min(c, resolution)):
-                ch_data = normalized[ch]
-                ch_resized = zoom(ch_data, (scale_h, scale_w), order=1)
+            voxels = np.zeros((resolution, resolution, resolution))
+
+            for ch in range(n_channels):
                 z_start = ch * depth_per_channel
                 z_end = min(z_start + depth_per_channel, resolution)
-                for z in range(z_start, z_end):
-                    voxels[:, :, z] = ch_resized
-            
+                voxels[:, :, z_start:z_end] = all_resized[ch, :, :, np.newaxis]
+
             return voxels
-        
+
         elif len(arr.shape) == 2:  # FC layer: (B, features)
             data = arr[0]
             normalized = (data - data.min()) / (data.max() - data.min() + 1e-8)
-            
+
             side = int(np.ceil(len(data) ** (1/3)))
             padded = np.zeros(side ** 3)
             padded[:len(data)] = normalized
             voxels = padded.reshape((side, side, side))
-            
-            from scipy.ndimage import zoom
+
             scale = resolution / side
             return zoom(voxels, scale, order=1)
-        
+
         return None
     
     def serialize_for_websocket(self, layer_name: Optional[str] = None) -> bytes:

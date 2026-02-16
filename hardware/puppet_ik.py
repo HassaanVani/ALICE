@@ -1,3 +1,4 @@
+import logging
 import math
 import time
 import json
@@ -191,8 +192,11 @@ class GestureToGripper:
 
 
 class TeachingRecorder:
-    def __init__(self, mapper: HandToArmMapper):
+    DEFAULT_MAX_FRAMES = 6000  # 5 minutes at 50ms intervals
+
+    def __init__(self, mapper: HandToArmMapper, max_frames: int = DEFAULT_MAX_FRAMES):
         self.mapper = mapper
+        self.max_frames = max_frames
         self._recording = False
         self._current_motion: Optional[LearnedMotion] = None
         self._motions: dict[str, LearnedMotion] = {}
@@ -233,7 +237,14 @@ class TeachingRecorder:
     def record_frame(self, hand_x: float, hand_y: float, hand_z: float, gripper: bool) -> Optional[TeachingFrame]:
         if not self._recording or not self._current_motion:
             return None
-        
+
+        if len(self._current_motion.frames) >= self.max_frames:
+            logging.getLogger("TeachingRecorder").warning(
+                f"Max frames ({self.max_frames}) reached, stopping recording"
+            )
+            self.stop_recording()
+            return None
+
         now = time.time() * 1000
         if now - self._last_record_time < self._record_interval_ms:
             return None

@@ -68,16 +68,21 @@ class PuppetServer:
     async def _handle_message(self, message: str, websocket: WebSocketServerProtocol) -> None:
         try:
             data = json.loads(message)
-            msg_type = data.get("type") or data.get("command")
-            
+        except json.JSONDecodeError:
+            await self._send_error(websocket, "Invalid JSON")
+            return
+
+        msg_type = data.get("type") or data.get("command")
+
+        try:
             if msg_type == "hand_position":
                 await self._handle_hand_position(data, websocket)
-            
+
             elif msg_type == "start_teaching":
                 name = data.get("name", f"motion_{len(self.recorder.motions)}")
                 self.recorder.start_recording(name)
                 logger.info(f"Teaching started: {name}")
-            
+
             elif msg_type == "stop_teaching":
                 motion = self.recorder.stop_recording()
                 if motion:
@@ -88,27 +93,43 @@ class PuppetServer:
                         "frames": len(motion.frames),
                         "duration": motion.duration
                     }))
-            
+
             elif msg_type == "play_motion":
                 name = data.get("name")
+                if not name:
+                    await self._send_error(websocket, "play_motion requires 'name'")
+                    return
                 motion = self.recorder.get_motion(name)
                 if motion:
                     self.player.play(motion)
                     logger.info(f"Playing motion: {name}")
-            
+                else:
+                    await self._send_error(websocket, f"Motion '{name}' not found")
+
             elif msg_type == "list_motions":
                 await websocket.send(json.dumps({
                     "type": "motion_list",
                     "motions": self.recorder.list_motions()
                 }))
-            
+
             elif msg_type == "set_speed":
                 self.player.set_speed(data.get("speed", 1.0))
-        
-        except json.JSONDecodeError:
-            pass
+
+            else:
+                logger.warning(f"Unknown message type: {msg_type}")
+
+        except (KeyError, TypeError, ValueError) as e:
+            logger.error(f"Bad message data for '{msg_type}': {e}")
+            await self._send_error(websocket, str(e))
         except Exception as e:
-            logger.error(f"Message handling error: {e}")
+            logger.exception(f"Unexpected error handling '{msg_type}'")
+            await self._send_error(websocket, "Internal server error")
+
+    async def _send_error(self, websocket: WebSocketServerProtocol, detail: str) -> None:
+        try:
+            await websocket.send(json.dumps({"type": "error", "detail": detail}))
+        except Exception:
+            pass
     
     async def _handle_hand_position(self, data: dict, websocket: WebSocketServerProtocol) -> None:
         pos = data.get("position", {})

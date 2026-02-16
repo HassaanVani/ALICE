@@ -1,8 +1,12 @@
+import asyncio
+import logging
 import time
 import math
 from typing import Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
+
+logger = logging.getLogger("ArmController")
 
 try:
     import serial
@@ -40,6 +44,9 @@ class ArmController:
     ANGLE_MAX = 180.0
     HOME_POSITION = ArmPosition(90, 90, 90, 90, 90)
     
+    MAX_RECONNECT_ATTEMPTS = 5
+    RECONNECT_BASE_DELAY = 0.5
+
     def __init__(self, port: str = "COM3", baudrate: int = 115200, simulate: bool = False):
         self.port = port
         self.baudrate = baudrate
@@ -48,6 +55,7 @@ class ArmController:
         self._state = ArmState.DISCONNECTED
         self._current_position = ArmPosition()
         self._target_position = ArmPosition()
+        self._reconnect_attempts = 0
     
     @property
     def state(self) -> ArmState:
@@ -66,17 +74,34 @@ class ArmController:
             self._state = ArmState.IDLE
             self._current_position = ArmPosition()
             return True
-        
+
         try:
+            if self._serial and self._serial.is_open:
+                self._serial.close()
             self._serial = serial.Serial(self.port, self.baudrate, timeout=1)
             time.sleep(2)  # Wait for Arduino reset
             self._state = ArmState.IDLE
             self._current_position = ArmPosition()
+            self._reconnect_attempts = 0
+            logger.info(f"Connected on {self.port}")
             return True
-        except Exception as e:
+        except serial.SerialException as e:
             self._state = ArmState.ERROR
-            print(f"[ArmController] Connection failed: {e}")
+            logger.error(f"Connection failed: {e}")
             return False
+
+    def reconnect(self) -> bool:
+        if self.simulate:
+            return True
+        if self._reconnect_attempts >= self.MAX_RECONNECT_ATTEMPTS:
+            logger.error(f"Reconnect failed after {self.MAX_RECONNECT_ATTEMPTS} attempts")
+            return False
+
+        self._reconnect_attempts += 1
+        delay = self.RECONNECT_BASE_DELAY * (2 ** (self._reconnect_attempts - 1))
+        logger.info(f"Reconnect attempt {self._reconnect_attempts}/{self.MAX_RECONNECT_ATTEMPTS} in {delay:.1f}s")
+        time.sleep(delay)
+        return self.connect()
     
     def disconnect(self) -> None:
         if self._serial and self._serial.is_open:
@@ -109,39 +134,68 @@ class ArmController:
         self._state = ArmState.IDLE
         return True
     
+    async def move_to_async(self, angles: Tuple[float, ...], speed: float = 1.0) -> bool:
+        if self._state == ArmState.DISCONNECTED:
+            return False
+
+        if len(angles) != self.AXIS_COUNT:
+            raise ValueError(f"Expected {self.AXIS_COUNT} angles, got {len(angles)}")
+
+        clamped = tuple(
+            max(self.ANGLE_MIN, min(self.ANGLE_MAX, a)) for a in angles
+        )
+        self._target_position = ArmPosition.from_tuple(clamped)
+        self._state = ArmState.MOVING
+
+        if self.simulate:
+            self._current_position = self._target_position
+        else:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._send_command, clamped)
+
+        self._current_position = self._target_position
+        self._state = ArmState.IDLE
+        return True
+
     def move_axis(self, axis: int, angle: float) -> bool:
         if axis < 0 or axis >= self.AXIS_COUNT:
             raise ValueError(f"Invalid axis: {axis}")
-        
+
         current = list(self._current_position.as_tuple())
         current[axis] = angle
         return self.move_to(tuple(current))
-    
+
     def _simulate_movement(self, speed: float) -> None:
         steps = int(20 / speed)
         delay = 0.01
-        
+
         start = self._current_position.as_tuple()
         end = self._target_position.as_tuple()
-        
+
         for i in range(steps):
             t = (i + 1) / steps
             t = t * t * (3 - 2 * t)  # Smoothstep
             interpolated = tuple(s + (e - s) * t for s, e in zip(start, end))
             self._current_position = ArmPosition.from_tuple(interpolated)
             time.sleep(delay)
-    
+
     def _send_command(self, angles: Tuple[float, ...]) -> None:
         if not self._serial or not self._serial.is_open:
-            return
-        
+            if not self.reconnect():
+                return
+
         cmd = ",".join(f"{int(a)}" for a in angles) + "\n"
-        self._serial.write(cmd.encode())
-        self._serial.flush()
-        
-        response = self._serial.readline().decode().strip()
-        if response != "OK":
-            print(f"[ArmController] Unexpected response: {response}")
+        try:
+            self._serial.write(cmd.encode())
+            self._serial.flush()
+
+            response = self._serial.readline().decode().strip()
+            if response != "OK":
+                logger.warning(f"Unexpected response: {response}")
+        except serial.SerialException as e:
+            logger.error(f"Serial write failed: {e}")
+            self._state = ArmState.ERROR
+            self.reconnect()
     
     def __enter__(self) -> "ArmController":
         self.connect()
