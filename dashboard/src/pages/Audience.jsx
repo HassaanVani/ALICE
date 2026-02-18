@@ -1,157 +1,45 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const WS_URL = `ws://${window.location.hostname || 'localhost'}:8767`;
 
-const VOTE_OPTIONS = [
-  { id: 'sort_color', label: 'Sort by Color', icon: 'palette', color: '#3b82f6' },
-  { id: 'sort_size', label: 'Sort by Size', icon: 'resize', color: '#a855f7' },
-  { id: 'stack_tower', label: 'Stack Tower', icon: 'layers', color: '#22c55e' },
-  { id: 'tetris_pack', label: 'Tetris Pack', icon: 'grid', color: '#eab308' },
-  { id: 'chaos', label: 'Chaos Mode', icon: 'zap', color: '#ef4444' },
-];
+const REACTIONS = ['👏', '🔥', '😮', '💀', '🤖', '🧠'];
 
-const styles = {
-  page: {
-    minHeight: '100vh',
-    background: '#09090b',
-    color: '#e4e4e7',
-    fontFamily: "'SF Mono', 'Fira Code', monospace",
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    padding: '24px 16px',
-    overflow: 'auto',
-  },
-  header: {
-    textAlign: 'center',
-    marginBottom: 32,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 700,
-    color: '#3b82f6',
-    letterSpacing: '0.15em',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 12,
-    color: '#52525b',
-  },
-  connectionBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '4px 12px',
-    borderRadius: 20,
-    fontSize: 10,
-    marginTop: 8,
-    border: '1px solid #27272a',
-  },
-  votesContainer: {
-    width: '100%',
-    maxWidth: 400,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    marginBottom: 32,
-  },
-  voteButton: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '16px 20px',
-    border: '1px solid #27272a',
-    borderRadius: 8,
-    background: '#111113',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    WebkitTapHighlightColor: 'transparent',
-  },
-  voteLabel: {
-    fontSize: 14,
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  },
-  voteCount: {
-    fontSize: 20,
-    fontWeight: 700,
-  },
-  tiltSection: {
-    width: '100%',
-    maxWidth: 400,
-    textAlign: 'center',
-    padding: '20px 0',
-    borderTop: '1px solid #27272a',
-  },
-  tiltLabel: {
-    fontSize: 11,
-    color: '#52525b',
-    textTransform: 'uppercase',
-    letterSpacing: '0.1em',
-    marginBottom: 16,
-  },
-  tiltDisplay: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 32,
-  },
-  tiltAxis: {
-    textAlign: 'center',
-  },
-  tiltValue: {
-    fontSize: 24,
-    fontWeight: 700,
-    color: '#3b82f6',
-    fontVariantNumeric: 'tabular-nums',
-  },
-  tiltAxisLabel: {
-    fontSize: 10,
-    color: '#52525b',
-    marginTop: 4,
-    textTransform: 'uppercase',
-  },
-  joystick: {
-    width: 150,
-    height: 150,
-    borderRadius: '50%',
-    border: '2px solid #27272a',
-    background: '#111113',
-    position: 'relative',
-    margin: '16px auto',
-    touchAction: 'none',
-  },
-  joystickDot: {
-    width: 20,
-    height: 20,
-    borderRadius: '50%',
-    background: '#3b82f6',
-    boxShadow: '0 0 12px rgba(59,130,246,0.5)',
-    position: 'absolute',
-    transform: 'translate(-50%, -50%)',
-    transition: 'all 0.1s ease',
-  },
-  backLink: {
-    marginTop: 32,
-    fontSize: 11,
-    color: '#52525b',
-    textDecoration: 'none',
-    cursor: 'pointer',
-  },
+const BLOCK_COLORS = {
+  1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#84cc16',
+  5: '#22c55e', 6: '#14b8a6', 7: '#06b6d4', 8: '#3b82f6',
+  9: '#6366f1', 10: '#8b5cf6', 11: '#a855f7', 12: '#d946ef',
+  13: '#ec4899', 14: '#f43f5e', 15: '#fb923c', 16: '#a3e635',
 };
+
+function getBlockColor(id) {
+  return BLOCK_COLORS[id] || '#71717a';
+}
+
+// ─── Main Component ─────────────────────────────────────────────
 
 export default function Audience() {
   const [connected, setConnected] = useState(false);
+  const [clientId, setClientId] = useState(null);
+  const [audienceCount, setAudienceCount] = useState(0);
+  const [phase, setPhase] = useState({ label: 'Connecting...', desc: '', interactive: false });
+  const [blocks, setBlocks] = useState([]);
   const [votes, setVotes] = useState({});
-  const [selectedVote, setSelectedVote] = useState(null);
-  const [tilt, setTilt] = useState({ alpha: 0, beta: 0, gamma: 0 });
+  const [myVote, setMyVote] = useState(null);
+  const [leadingBlock, setLeadingBlock] = useState(null);
+  const [lastWinner, setLastWinner] = useState(null);
+  const [winnerFlash, setWinnerFlash] = useState(null);
+  const [robotAction, setRobotAction] = useState(null);
+  const [sortState, setSortState] = useState('idle');
+  const [score, setScore] = useState(0);
+  const [floatingReactions, setFloatingReactions] = useState([]);
   const [tiltEnabled, setTiltEnabled] = useState(false);
+  const [tilt, setTilt] = useState({ beta: 0, gamma: 0 });
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
+  const reactionIdRef = useRef(0);
 
-  // WebSocket connection
+  // ── WebSocket ───────────────────────────────────────────────
+
   const connect = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
@@ -159,22 +47,64 @@ export default function Audience() {
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
-      ws.onopen = () => {
-        setConnected(true);
-        console.log('[Audience] Connected to', WS_URL);
-      };
+      ws.onopen = () => setConnected(true);
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === 'vote_update') {
-            setVotes(msg.votes || {});
-          } else if (msg.type === 'vote_ack') {
-            // Vote acknowledged
+
+          if (msg.type === 'welcome') {
+            setClientId(msg.client_id);
+            setAudienceCount(msg.audience_count);
+            if (msg.phase) setPhase(msg.phase);
+            if (msg.votes) setVotes(msg.votes);
+            if (msg.state?.detected_blocks) setBlocks(msg.state.detected_blocks);
+            if (msg.state?.sort_state) setSortState(msg.state.sort_state);
+            if (msg.state?.tetris_score) setScore(msg.state.tetris_score);
+            if (msg.last_winner) setLastWinner(msg.last_winner);
           }
-        } catch {
-          // Ignore
-        }
+
+          else if (msg.type === 'state_update') {
+            if (msg.phase) setPhase(msg.phase);
+            if (msg.audience_count != null) setAudienceCount(msg.audience_count);
+            if (msg.votes) setVotes(msg.votes);
+            if (msg.state?.detected_blocks) setBlocks(msg.state.detected_blocks);
+            if (msg.state?.sort_state) setSortState(msg.state.sort_state);
+            if (msg.state?.tetris_score != null) setScore(msg.state.tetris_score);
+            if (msg.last_winner) setLastWinner(msg.last_winner);
+          }
+
+          else if (msg.type === 'vote_update') {
+            setVotes(msg.votes || {});
+            setLeadingBlock(msg.leading);
+          }
+
+          else if (msg.type === 'vote_ack') {
+            setMyVote(msg.block_id);
+          }
+
+          else if (msg.type === 'vote_winner') {
+            setWinnerFlash(msg);
+            setMyVote(null);
+            setVotes({});
+            // Clear flash after 3 seconds
+            setTimeout(() => setWinnerFlash(null), 3000);
+          }
+
+          else if (msg.type === 'robot_action') {
+            setRobotAction(msg);
+            setTimeout(() => setRobotAction(null), 2000);
+          }
+
+          else if (msg.type === 'audience_count') {
+            setAudienceCount(msg.count);
+          }
+
+          else if (msg.type === 'reaction') {
+            spawnFloatingReaction(msg.emoji);
+          }
+
+        } catch { /* ignore parse errors */ }
       };
 
       ws.onclose = () => {
@@ -197,172 +127,454 @@ export default function Audience() {
     };
   }, [connect]);
 
-  // Device orientation for tilt control
+  // ── Send helpers ────────────────────────────────────────────
+
+  const send = (msg) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(msg));
+    }
+  };
+
+  const voteForBlock = (blockId) => {
+    send({ type: 'vote_block', block_id: blockId });
+  };
+
+  const sendReaction = (emoji) => {
+    send({ type: 'reaction', emoji });
+    spawnFloatingReaction(emoji);
+  };
+
+  // ── Floating reactions ──────────────────────────────────────
+
+  const spawnFloatingReaction = (emoji) => {
+    const id = reactionIdRef.current++;
+    const x = 20 + Math.random() * 60; // 20-80% of screen width
+    setFloatingReactions(prev => [...prev.slice(-20), { id, emoji, x }]);
+    setTimeout(() => {
+      setFloatingReactions(prev => prev.filter(r => r.id !== id));
+    }, 2000);
+  };
+
+  // ── Device tilt ─────────────────────────────────────────────
+
   const enableTilt = async () => {
     try {
-      // Request permission on iOS 13+
       if (typeof DeviceOrientationEvent !== 'undefined' &&
           typeof DeviceOrientationEvent.requestPermission === 'function') {
-        const permission = await DeviceOrientationEvent.requestPermission();
-        if (permission !== 'granted') {
-          console.warn('Device orientation permission denied');
-          return;
-        }
+        const perm = await DeviceOrientationEvent.requestPermission();
+        if (perm !== 'granted') return;
       }
-
       setTiltEnabled(true);
-    } catch (err) {
-      console.warn('Tilt not available:', err);
-    }
+    } catch { /* not available */ }
   };
 
   useEffect(() => {
     if (!tiltEnabled) return;
-
-    const handleOrientation = (event) => {
-      const alpha = event.alpha || 0;
-      const beta = event.beta || 0;
-      const gamma = event.gamma || 0;
-
-      setTilt({ alpha, beta, gamma });
-
-      // Send tilt data to server
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
+    let throttle = 0;
+    const handle = (e) => {
+      const beta = e.beta || 0;
+      const gamma = e.gamma || 0;
+      setTilt({ beta, gamma });
+      // Throttle sends to ~10hz
+      const now = Date.now();
+      if (now - throttle > 100) {
+        throttle = now;
+        send({
           type: 'tilt',
-          alpha: Math.round(alpha * 10) / 10,
           beta: Math.round(beta * 10) / 10,
           gamma: Math.round(gamma * 10) / 10,
-        }));
+        });
       }
     };
-
-    window.addEventListener('deviceorientation', handleOrientation);
-    return () => window.removeEventListener('deviceorientation', handleOrientation);
+    window.addEventListener('deviceorientation', handle);
+    return () => window.removeEventListener('deviceorientation', handle);
   }, [tiltEnabled]);
 
-  // Send vote
-  const handleVote = (optionId) => {
-    setSelectedVote(optionId);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'vote', option: optionId }));
-    }
-  };
+  // ── Derived state ───────────────────────────────────────────
 
-  // Map tilt to joystick position
-  const joystickX = 50 + Math.max(-50, Math.min(50, tilt.gamma)) / 50 * 45;
-  const joystickY = 50 + Math.max(-50, Math.min(50, tilt.beta)) / 50 * 45;
+  const isInteractive = phase.interactive;
+  const totalVotes = Object.values(votes).reduce((a, b) => a + b, 0);
+  const iWon = winnerFlash && winnerFlash.voter_ids?.includes(clientId);
+
+  // ── Render ──────────────────────────────────────────────────
 
   return (
     <div style={styles.page}>
+
+      {/* Floating reactions */}
+      {floatingReactions.map(r => (
+        <div key={r.id} style={{ ...styles.floatingReaction, left: `${r.x}%` }}>
+          {r.emoji}
+        </div>
+      ))}
+
+      {/* ── Header bar ── */}
       <div style={styles.header}>
-        <div style={styles.title}>ALICE</div>
-        <div style={styles.subtitle}>Audience Control Panel</div>
-        <div style={{
-          ...styles.connectionBadge,
-          borderColor: connected ? '#22c55e30' : '#ef444430',
-          color: connected ? '#22c55e' : '#ef4444',
-        }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: '50%',
-            background: connected ? '#22c55e' : '#ef4444',
-          }} />
-          {connected ? 'CONNECTED' : 'CONNECTING...'}
+        <div style={styles.headerRow}>
+          <div style={styles.logoMark}>A</div>
+          <div style={styles.headerInfo}>
+            <div style={styles.phaseLabel}>{phase.label}</div>
+            <div style={styles.phaseDesc}>{phase.desc}</div>
+          </div>
+          <div style={styles.headerRight}>
+            <div style={{
+              ...styles.connectionDot,
+              background: connected ? '#22c55e' : '#ef4444',
+              boxShadow: connected ? '0 0 8px #22c55e80' : '0 0 8px #ef444480',
+            }} />
+            <span style={styles.audienceCount}>{audienceCount}</span>
+          </div>
         </div>
       </div>
 
-      {/* Vote Buttons */}
-      <div style={styles.votesContainer}>
-        {VOTE_OPTIONS.map((option) => {
-          const isSelected = selectedVote === option.id;
-          const count = votes[option.id] || 0;
-          return (
-            <button
-              key={option.id}
-              onClick={() => handleVote(option.id)}
-              style={{
-                ...styles.voteButton,
-                borderColor: isSelected ? option.color : '#27272a',
-                background: isSelected ? `${option.color}15` : '#111113',
-                transform: isSelected ? 'scale(1.02)' : 'scale(1)',
-              }}
-            >
-              <span style={{ ...styles.voteLabel, color: isSelected ? option.color : '#a1a1aa' }}>
-                {option.label}
-              </span>
-              <span style={{ ...styles.voteCount, color: option.color }}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {/* ── Score bar (contextual) ── */}
+      {(sortState !== 'idle' || score > 0) && (
+        <div style={styles.scorebar}>
+          {sortState === 'cyborg_coop' && <span>CYBORG MODE</span>}
+          {sortState === 'human_benchmark' && <span>HUMAN SORTING...</span>}
+          {sortState === 'complete' && <span>COMPLETE!</span>}
+          {score > 0 && <span>SCORE: {score}</span>}
+        </div>
+      )}
 
-      {/* Tilt Control */}
-      <div style={styles.tiltSection}>
-        <div style={styles.tiltLabel}>Tilt Control</div>
+      {/* ── Winner flash ── */}
+      {winnerFlash && (
+        <div style={{
+          ...styles.winnerBanner,
+          background: iWon ? 'rgba(34,197,94,0.15)' : 'rgba(59,130,246,0.1)',
+          borderColor: iWon ? '#22c55e' : '#3b82f6',
+        }}>
+          <div style={styles.winnerEmoji}>{iWon ? '🎯' : '🤖'}</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: iWon ? '#22c55e' : '#3b82f6' }}>
+              {iWon ? 'Your pick won!' : `Block ${winnerFlash.block_id} chosen`}
+            </div>
+            <div style={{ fontSize: 11, color: '#71717a', marginTop: 2 }}>
+              {winnerFlash.voter_count} vote{winnerFlash.voter_count !== 1 ? 's' : ''}
+            </div>
+          </div>
+        </div>
+      )}
 
-        {!tiltEnabled ? (
-          <button
-            onClick={enableTilt}
-            style={{
-              padding: '12px 24px',
-              border: '1px solid #3b82f6',
-              borderRadius: 6,
-              background: 'rgba(59,130,246,0.1)',
-              color: '#3b82f6',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 12,
-              cursor: 'pointer',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}
-          >
-            Enable Tilt
-          </button>
+      {/* ── Robot action feedback ── */}
+      {robotAction && (
+        <div style={styles.actionBanner}>
+          <span style={styles.actionDot} />
+          Robot: {robotAction.action} block {robotAction.block_id}
+        </div>
+      )}
+
+      {/* ── Block map ── */}
+      <div style={styles.blockMapContainer}>
+        {blocks.length === 0 ? (
+          <div style={styles.emptyMap}>
+            {connected
+              ? (isInteractive ? 'Waiting for blocks...' : 'Watching...')
+              : 'Connecting...'}
+          </div>
         ) : (
-          <>
-            {/* Virtual joystick */}
-            <div style={styles.joystick}>
-              {/* Crosshair */}
-              <div style={{
-                position: 'absolute', top: '50%', left: 0, right: 0,
-                height: 1, background: '#27272a',
-              }} />
-              <div style={{
-                position: 'absolute', left: '50%', top: 0, bottom: 0,
-                width: 1, background: '#27272a',
-              }} />
-              {/* Dot */}
-              <div style={{
-                ...styles.joystickDot,
-                left: `${joystickX}%`,
-                top: `${joystickY}%`,
-              }} />
-            </div>
+          <svg viewBox="0 0 640 480" style={styles.blockSvg}>
+            {/* Grid lines */}
+            {[160, 320, 480].map(x => (
+              <line key={`vl${x}`} x1={x} y1={0} x2={x} y2={480}
+                stroke="#ffffff08" strokeWidth={1} />
+            ))}
+            {[160, 320].map(y => (
+              <line key={`hl${y}`} x1={0} y1={y} x2={640} y2={y}
+                stroke="#ffffff08" strokeWidth={1} />
+            ))}
 
-            {/* Tilt values */}
-            <div style={styles.tiltDisplay}>
-              <div style={styles.tiltAxis}>
-                <div style={styles.tiltValue}>{tilt.beta.toFixed(1)}</div>
-                <div style={styles.tiltAxisLabel}>Pitch</div>
-              </div>
-              <div style={styles.tiltAxis}>
-                <div style={styles.tiltValue}>{tilt.gamma.toFixed(1)}</div>
-                <div style={styles.tiltAxisLabel}>Roll</div>
-              </div>
-              <div style={styles.tiltAxis}>
-                <div style={styles.tiltValue}>{tilt.alpha.toFixed(1)}</div>
-                <div style={styles.tiltAxisLabel}>Yaw</div>
-              </div>
-            </div>
-          </>
+            {blocks.map((block) => {
+              const cx = block.center_x;
+              const cy = block.center_y;
+              const id = block.block_id;
+              const color = getBlockColor(id);
+              const voteCount = votes[id] || 0;
+              const isMyVote = myVote === id;
+              const isLeading = leadingBlock === id;
+              const isWinner = winnerFlash?.block_id === id;
+              const canVote = isInteractive;
+
+              // Scale circle by votes
+              const baseR = 18;
+              const r = baseR + Math.min(voteCount * 3, 15);
+
+              return (
+                <g key={id}
+                   onClick={() => canVote && voteForBlock(id)}
+                   style={{ cursor: canVote ? 'pointer' : 'default' }}>
+
+                  {/* Vote ring */}
+                  {voteCount > 0 && (
+                    <circle cx={cx} cy={cy} r={r + 6}
+                      fill="none" stroke={color} strokeWidth={2}
+                      opacity={0.3}
+                      strokeDasharray={`${(voteCount / Math.max(totalVotes, 1)) * 2 * Math.PI * (r + 6)} 999`}
+                    />
+                  )}
+
+                  {/* Winner pulse */}
+                  {isWinner && (
+                    <circle cx={cx} cy={cy} r={r + 12}
+                      fill="none" stroke="#22c55e" strokeWidth={2}
+                      opacity={0.6}>
+                      <animate attributeName="r" from={r + 8} to={r + 30}
+                        dur="0.8s" repeatCount="3" />
+                      <animate attributeName="opacity" from="0.6" to="0"
+                        dur="0.8s" repeatCount="3" />
+                    </circle>
+                  )}
+
+                  {/* Block circle */}
+                  <circle cx={cx} cy={cy} r={r}
+                    fill={`${color}30`}
+                    stroke={isMyVote ? '#ffffff' : isLeading ? '#fbbf24' : color}
+                    strokeWidth={isMyVote ? 3 : isLeading ? 2.5 : 1.5}
+                  />
+
+                  {/* Block ID */}
+                  <text x={cx} y={cy + 1}
+                    textAnchor="middle" dominantBaseline="central"
+                    fill="#ffffff" fontSize={12} fontWeight={700}
+                    fontFamily="monospace"
+                    style={{ pointerEvents: 'none' }}>
+                    {id}
+                  </text>
+
+                  {/* Vote count badge */}
+                  {voteCount > 0 && (
+                    <g>
+                      <circle cx={cx + r * 0.7} cy={cy - r * 0.7} r={9}
+                        fill={isLeading ? '#fbbf24' : '#3b82f6'} />
+                      <text x={cx + r * 0.7} y={cy - r * 0.7 + 1}
+                        textAnchor="middle" dominantBaseline="central"
+                        fill="#000" fontSize={9} fontWeight={800}
+                        fontFamily="monospace" style={{ pointerEvents: 'none' }}>
+                        {voteCount}
+                      </text>
+                    </g>
+                  )}
+
+                  {/* "YOU" indicator */}
+                  {isMyVote && (
+                    <text x={cx} y={cy + r + 14}
+                      textAnchor="middle" fill="#ffffff" fontSize={8}
+                      fontWeight={600} fontFamily="monospace" letterSpacing="0.1em"
+                      style={{ pointerEvents: 'none' }}>
+                      YOUR PICK
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        )}
+
+        {/* Tap hint overlay */}
+        {isInteractive && blocks.length > 0 && !myVote && (
+          <div style={styles.tapHint}>TAP A BLOCK TO VOTE</div>
         )}
       </div>
 
-      <a href="#/" style={styles.backLink}>
-        Back to Dashboard
-      </a>
+      {/* ── Tilt section ── */}
+      <div style={styles.tiltSection}>
+        {!tiltEnabled ? (
+          <button onClick={enableTilt} style={styles.tiltButton}>
+            Enable Tilt Control
+          </button>
+        ) : (
+          <div style={styles.tiltBar}>
+            <div style={styles.tiltDot}>
+              <div style={{
+                ...styles.tiltIndicator,
+                transform: `translate(${Math.max(-20, Math.min(20, tilt.gamma / 2))}px, ${Math.max(-20, Math.min(20, tilt.beta / 2))}px)`,
+              }} />
+            </div>
+            <span style={styles.tiltLabel}>TILT ACTIVE</span>
+          </div>
+        )}
+      </div>
+
+      {/* ── Reactions ── */}
+      <div style={styles.reactionBar}>
+        {REACTIONS.map(emoji => (
+          <button key={emoji}
+            onClick={() => sendReaction(emoji)}
+            style={styles.reactionButton}>
+            {emoji}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────
+
+const styles = {
+  page: {
+    minHeight: '100dvh',
+    background: '#09090b',
+    color: '#e4e4e7',
+    fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
+    display: 'flex',
+    flexDirection: 'column',
+    position: 'relative',
+    overflow: 'hidden',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    touchAction: 'manipulation',
+  },
+
+  // Header
+  header: {
+    padding: '12px 16px',
+    borderBottom: '1px solid #ffffff0a',
+    flexShrink: 0,
+  },
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+  },
+  logoMark: {
+    width: 32, height: 32, borderRadius: 8,
+    background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 16, fontWeight: 800, color: '#fff',
+    flexShrink: 0,
+  },
+  headerInfo: { flex: 1 },
+  phaseLabel: {
+    fontSize: 14, fontWeight: 700, color: '#e4e4e7',
+    textTransform: 'uppercase', letterSpacing: '0.05em',
+  },
+  phaseDesc: { fontSize: 11, color: '#71717a', marginTop: 1 },
+  headerRight: {
+    display: 'flex', alignItems: 'center', gap: 6,
+  },
+  connectionDot: {
+    width: 8, height: 8, borderRadius: '50%',
+    transition: 'all 0.3s',
+  },
+  audienceCount: {
+    fontSize: 13, fontWeight: 600, color: '#a1a1aa',
+    fontVariantNumeric: 'tabular-nums',
+  },
+
+  // Score bar
+  scorebar: {
+    display: 'flex', justifyContent: 'center', gap: 16,
+    padding: '6px 16px',
+    fontSize: 10, fontWeight: 700, color: '#71717a',
+    textTransform: 'uppercase', letterSpacing: '0.1em',
+    borderBottom: '1px solid #ffffff06',
+    flexShrink: 0,
+  },
+
+  // Winner banner
+  winnerBanner: {
+    margin: '8px 16px', padding: '12px 16px',
+    borderRadius: 10, border: '1px solid',
+    display: 'flex', alignItems: 'center', gap: 12,
+    animation: 'fadeInScale 0.3s ease',
+    flexShrink: 0,
+  },
+  winnerEmoji: { fontSize: 28, flexShrink: 0 },
+
+  // Action banner
+  actionBanner: {
+    margin: '4px 16px', padding: '8px 12px',
+    borderRadius: 6, background: '#3b82f610',
+    border: '1px solid #3b82f630',
+    fontSize: 11, color: '#3b82f6', fontWeight: 600,
+    display: 'flex', alignItems: 'center', gap: 8,
+    flexShrink: 0,
+  },
+  actionDot: {
+    width: 6, height: 6, borderRadius: '50%',
+    background: '#3b82f6', flexShrink: 0,
+    animation: 'pulse 1s infinite',
+  },
+
+  // Block map
+  blockMapContainer: {
+    flex: 1, position: 'relative',
+    margin: '0 8px', minHeight: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  blockSvg: {
+    width: '100%', maxHeight: '100%',
+    borderRadius: 8, background: '#0c0c0f',
+    border: '1px solid #ffffff08',
+  },
+  emptyMap: {
+    fontSize: 13, color: '#52525b', textAlign: 'center',
+    padding: 40,
+  },
+  tapHint: {
+    position: 'absolute', bottom: 12, left: '50%',
+    transform: 'translateX(-50%)',
+    padding: '6px 16px', borderRadius: 20,
+    background: '#3b82f620', border: '1px solid #3b82f640',
+    fontSize: 10, fontWeight: 700, color: '#3b82f6',
+    letterSpacing: '0.1em',
+    animation: 'pulse 2s infinite',
+  },
+
+  // Tilt
+  tiltSection: {
+    padding: '8px 16px',
+    flexShrink: 0,
+  },
+  tiltButton: {
+    width: '100%', padding: '10px',
+    border: '1px solid #27272a', borderRadius: 8,
+    background: '#111113', color: '#71717a',
+    fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+    textTransform: 'uppercase', letterSpacing: '0.05em',
+    cursor: 'pointer',
+  },
+  tiltBar: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+  },
+  tiltDot: {
+    width: 44, height: 44, borderRadius: '50%',
+    border: '1px solid #27272a', background: '#111113',
+    position: 'relative', display: 'flex',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  tiltIndicator: {
+    width: 10, height: 10, borderRadius: '50%',
+    background: '#3b82f6', boxShadow: '0 0 8px #3b82f680',
+    transition: 'transform 0.1s',
+  },
+  tiltLabel: {
+    fontSize: 10, fontWeight: 600, color: '#3b82f6',
+    letterSpacing: '0.1em',
+  },
+
+  // Reactions
+  reactionBar: {
+    display: 'flex', justifyContent: 'center', gap: 4,
+    padding: '10px 16px',
+    borderTop: '1px solid #ffffff06',
+    flexShrink: 0,
+  },
+  reactionButton: {
+    width: 44, height: 44, borderRadius: 10,
+    border: '1px solid #ffffff0a', background: '#111113',
+    fontSize: 20, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    transition: 'transform 0.1s, background 0.1s',
+    WebkitTapHighlightColor: 'transparent',
+  },
+
+  // Floating reactions
+  floatingReaction: {
+    position: 'absolute', bottom: 80,
+    fontSize: 28, pointerEvents: 'none',
+    animation: 'floatUp 2s ease-out forwards',
+    zIndex: 100,
+  },
+};

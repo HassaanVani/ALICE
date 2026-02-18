@@ -30,6 +30,7 @@ RL_AGENT_PATH = Path(__file__).parent / "brain" / "weights" / "sort_agent.zip"
 
 
 class Mode(Enum):
+    IDLE = "idle"
     CHIMP_SORT = "chimp"
     TETRIS = "tetris"
     CALIBRATE = "calibrate"
@@ -69,7 +70,8 @@ class ALICE:
 
         # Audience
         self.audience_server = AudienceServer(
-            port=config.websocket.audience_port
+            port=config.websocket.audience_port,
+            state_manager=self.state_manager,
         )
 
         # Narration
@@ -252,7 +254,9 @@ class ALICE:
         """Main dispatch loop — runs the current mode, supports hot-swap."""
         while self._running:
             try:
-                if self.mode == Mode.CHIMP_SORT:
+                if self.mode == Mode.IDLE:
+                    await self._run_idle()
+                elif self.mode == Mode.CHIMP_SORT:
                     await self._run_chimp_sort()
                 elif self.mode == Mode.TETRIS:
                     await self._run_tetris()
@@ -265,6 +269,16 @@ class ALICE:
             except Exception as e:
                 logger.error(f"Mode loop error: {e}")
                 await asyncio.sleep(0.5)
+
+    async def _run_idle(self) -> None:
+        """Idle mode — just keep state broadcasting, wait for mode switch."""
+        current_mode = self.mode
+        while self._running and self.mode == current_mode:
+            # Still stream camera + activations so the dashboard has something to show
+            frame = self.cameras.get_frame(CameraRole.OVERHEAD)
+            if frame is not None and not self.inference.is_frozen:
+                self.inference.predict(frame)
+            await asyncio.sleep(0.1)
 
     async def _run_chimp_sort(self) -> None:
         self.sort_fsm.start_human_benchmark()
@@ -301,10 +315,13 @@ class ALICE:
                 break
 
             if self.sort_fsm.state == SortState.CYBORG_COOP:
-                # Check audience votes
-                audience_vote = self.audience_server.get_winning_block_id()
-                if audience_vote:
-                    self.audience_server.clear_votes()
+                # Consume audience block votes (returns winner + clears for next round)
+                audience_vote = None
+                winner_info = self.audience_server.consume_votes()
+                if winner_info:
+                    audience_vote = winner_info["block_id"]
+                    # Tell every phone who won
+                    await self.audience_server.broadcast_winner(winner_info)
 
                 target = self.sort_fsm.get_next_robot_target(
                     rl_agent=self._rl_agent,
@@ -312,6 +329,10 @@ class ALICE:
                 )
                 if target:
                     block_id, (tx, ty) = target
+                    # Tell audience what the robot is doing
+                    await self.audience_server.broadcast_action("pick", {
+                        "block_id": block_id, "target_x": tx, "target_y": ty,
+                    })
                     angles = self.calibration.pixel_to_arm(tx, ty)
                     self.arm.move_to(angles)
                     self.gripper.close()
@@ -482,7 +503,7 @@ class ALICE:
 async def main():
     parser = argparse.ArgumentParser(description="A.L.I.C.E. - Adaptive Learning Interface for Cognitive Exploration")
     parser.add_argument("--config", type=str, default=None, help="Path to alice.yaml config file")
-    parser.add_argument("--mode", type=str, choices=["chimp", "tetris", "calibrate", "puppeteer"], default=None)
+    parser.add_argument("--mode", type=str, choices=["idle", "chimp", "tetris", "calibrate", "puppeteer"], default=None)
     parser.add_argument("--simulate", action="store_true", default=None)
     parser.add_argument("--ws-port", type=int, default=None)
     parser.add_argument("--arm-port", type=str, default=None, help="Serial port for arm controller")
