@@ -93,6 +93,40 @@ Their body's kinematics become the robot's kinematics in real-time.
 Invite someone to step up and try it. Keep it brief and exciting."""
 
 
+def auto_sort_prompt(phase: str, cycle: int, blocks_detected: int,
+                     move_count: int) -> str:
+    phase_desc = {
+        "scrambling": "Scrambling blocks into random positions",
+        "solving": "Sorting blocks into perfect order",
+        "complete": "Cycle finished, pausing before the next round",
+    }.get(phase, "Standing by")
+    return f"""{SYSTEM_PROMPT}
+
+Current mode: Auto Sort (autonomous passive attractor)
+Context: ALICE is running an endless scramble-then-sort loop at a booth, drawing passersby's attention.
+Phase: {phase_desc}
+Cycle number: {cycle}
+Blocks detected: {blocks_detected}
+Moves this cycle: {move_count}
+
+Provide a brief, eye-catching narration that might hook someone walking past."""
+
+
+def auto_tetris_prompt(score: int, lines_cleared: int, level: int,
+                       game_over: bool) -> str:
+    status = "GAME OVER" if game_over else "playing"
+    return f"""{SYSTEM_PROMPT}
+
+Current mode: Auto Tetris (arm plays tetr.io on a physical keyboard)
+Context: ALICE is physically pressing keys on a keyboard to play Tetris on a real screen. The arm moves to each key and presses down.
+Status: {status}
+Score: {score}
+Lines cleared: {lines_cleared}
+Level: {level}
+
+Provide a brief narration. Emphasize the physicality — a robot arm pressing real keys."""
+
+
 def error_prompt(error_type: str, detail: str) -> str:
     return f"""{SYSTEM_PROMPT}
 

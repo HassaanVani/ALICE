@@ -102,7 +102,7 @@ class NarrationService:
         from narration_prompts import (
             chimp_sort_prompt, tetris_prompt, puppeteer_prompt,
             calibration_prompt, mode_switch_prompt, rebellion_prompt,
-            awaiting_puppeteer_prompt
+            awaiting_puppeteer_prompt, auto_sort_prompt, auto_tetris_prompt
         )
 
         # Check for mode switch
@@ -113,7 +113,8 @@ class NarrationService:
 
         self._last_mode = state.mode
 
-        if state.mode == "chimp":
+        if state.mode == "demo":
+            # Demo mode reuses chimp sort narration logic
             if state.sort_state == "rebellion":
                 return rebellion_prompt(
                     blocks_remaining=16 - len([b for b in state.detected_blocks
@@ -133,8 +134,15 @@ class NarrationService:
                 duration=elapsed,
                 move_count=state.sort_move_count,
             )
-        elif state.mode == "tetris":
-            return tetris_prompt(
+        elif state.mode == "auto_sort":
+            return auto_sort_prompt(
+                phase=state.auto_sort_phase,
+                cycle=state.auto_sort_cycle,
+                blocks_detected=len(state.detected_blocks),
+                move_count=state.sort_move_count,
+            )
+        elif state.mode == "auto_tetris":
+            return auto_tetris_prompt(
                 score=state.tetris_score,
                 lines_cleared=state.tetris_lines,
                 level=state.tetris_level,
@@ -174,7 +182,9 @@ class NarrationService:
         state = self._state_manager.state
         import time
 
-        if state.mode == "chimp":
+        if state.mode == "demo":
+            if state.sort_state == "scrambling":
+                return "Shuffling the blocks for the next round."
             if state.sort_state == "human_benchmark":
                 elapsed = time.time() - state.sort_start_time if state.sort_start_time else 0
                 return f"Human sorting in progress. {state.sort_move_count} moves in {elapsed:.0f} seconds."
@@ -193,10 +203,20 @@ class NarrationService:
                 return f"ALICE is sorting autonomously. {state.sort_move_count} moves, ignoring all suggestions."
             elif state.sort_state == "complete":
                 return "Sorting complete. Well done, team."
-        elif state.mode == "tetris":
+        elif state.mode == "auto_sort":
+            phase = state.auto_sort_phase
+            if phase == "scrambling":
+                return f"Scrambling blocks for cycle {state.auto_sort_cycle}."
+            elif phase == "solving":
+                return f"Solving cycle {state.auto_sort_cycle}. {state.sort_move_count} moves so far."
+            elif phase == "complete":
+                return f"Cycle {state.auto_sort_cycle} complete. Starting over."
+            return "Auto-sort standing by."
+        elif state.mode == "auto_tetris":
             if state.tetris_game_over:
                 return f"Game over. Final score: {state.tetris_score}, {state.tetris_lines} lines cleared."
-            return f"Tetris level {state.tetris_level}. Score: {state.tetris_score}, {state.tetris_lines} lines."
+            return (f"Playing Tetris on a real keyboard. Level {state.tetris_level}. "
+                    f"Score: {state.tetris_score}, {state.tetris_lines} lines.")
         elif state.mode == "puppeteer":
             if state.puppeteer_recording:
                 return "Recording arm motion for later playback."

@@ -1,0 +1,13 @@
+{
+  "keys": {
+    "left_arrow":  { "angles": [45, 110, 85, 70, 90] },
+    "right_arrow": { "angles": [55, 110, 85, 70, 90] },
+    "up_arrow":    { "angles": [50, 105, 80, 70, 90] },
+    "space":       { "angles": [50, 120, 95, 70, 90] },
+    "z":           { "angles": [35, 115, 90, 70, 90] },
+    "c":           { "angles": [40, 115, 90, 70, 90] }
+  },
+  "press_depth": 8.0,
+  "press_delay": 0.04,
+  "travel_delay": 0.06
+}

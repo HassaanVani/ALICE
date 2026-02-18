@@ -11,7 +11,7 @@ logger = logging.getLogger("AliceState")
 
 @dataclass
 class AliceState:
-    mode: str = "tetris"
+    mode: str = "idle"
     arm_position: tuple = (90.0, 90.0, 90.0, 90.0, 90.0)
     arm_state: str = "idle"
     gripper_position: float = 0.0
@@ -33,6 +33,10 @@ class AliceState:
     calibration_ready: bool = False
     rebellion_crowd_choice: Optional[int] = None
     rebellion_robot_choice: Optional[int] = None
+    auto_sort_phase: str = "idle"
+    auto_sort_cycle: int = 0
+    demo_act: int = 0
+    demo_act_label: str = ""
     detected_blocks: List[Dict] = field(default_factory=list)
     timestamp: float = 0.0
 
@@ -57,6 +61,10 @@ class AliceState:
             "calibration_ready": self.calibration_ready,
             "rebellion_crowd_choice": self.rebellion_crowd_choice,
             "rebellion_robot_choice": self.rebellion_robot_choice,
+            "auto_sort_phase": self.auto_sort_phase,
+            "auto_sort_cycle": self.auto_sort_cycle,
+            "demo_act": self.demo_act,
+            "demo_act_label": self.demo_act_label,
             "detected_blocks": self.detected_blocks,
             "timestamp": self.timestamp,
         }
@@ -142,6 +150,16 @@ class AliceStateManager:
     def update_calibration(self, points: int = 0, ready: bool = False) -> None:
         self._state.calibration_points = points
         self._state.calibration_ready = ready
+        self._notify()
+
+    def update_auto_sort(self, phase: str, cycle: int = 0) -> None:
+        self._state.auto_sort_phase = phase
+        self._state.auto_sort_cycle = cycle
+        self._notify()
+
+    def update_demo_act(self, act: int, label: str = "") -> None:
+        self._state.demo_act = act
+        self._state.demo_act_label = label
         self._notify()
 
     def update_blocks(self, blocks: List[Dict]) -> None:

@@ -8,6 +8,7 @@ from vision.aruco_detector import BlockData
 
 class SortState(Enum):
     IDLE = "idle"
+    SCRAMBLING = "scrambling"
     HUMAN_BENCHMARK = "human_benchmark"
     GHOST_REPLAY = "ghost_replay"
     AWAITING_PUPPETEER = "awaiting_puppeteer"

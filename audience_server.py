@@ -25,8 +25,11 @@ PHASE_INFO = {
     "awaiting_puppeteer":  {"label": "Puppeteer",     "desc": "A volunteer is becoming the robot",    "interactive": False},
     "cyborg_coop":         {"label": "Your Turn",     "desc": "Tap a block to vote!",                 "interactive": True},
     "rebellion":           {"label": "Override",       "desc": "ALICE has her own plan",               "interactive": True},
+    "scrambling":          {"label": "Scrambling",     "desc": "Shuffling blocks for the next round",  "interactive": False},
     "complete":            {"label": "Done!",          "desc": "Sorting complete",                     "interactive": False},
-    "tetris":              {"label": "Tetris",         "desc": "Tilt to nudge pieces",                 "interactive": True},
+    "auto_sort":           {"label": "Auto Sort",     "desc": "Watch ALICE sort autonomously",         "interactive": False},
+    "auto_tetris":         {"label": "Auto Tetris",   "desc": "ALICE plays Tetris on a real keyboard", "interactive": False},
+    "demo":                {"label": "Demo",           "desc": "Live 5-act show in progress",          "interactive": False},
     "calibrate":           {"label": "Calibrating",    "desc": "System calibration",                   "interactive": False},
     "puppeteer":           {"label": "Puppeteer",      "desc": "A volunteer controls the arm",         "interactive": False},
 }
@@ -228,8 +231,8 @@ class AudienceServer:
 
     def _get_phase_info(self, sort_state: str, mode: str) -> dict:
         """Determine the audience-facing phase from backend state."""
-        if mode == "chimp":
-            return PHASE_INFO.get(sort_state, PHASE_INFO["idle"])
+        if mode in ("demo", "auto_sort"):
+            return PHASE_INFO.get(sort_state, PHASE_INFO.get(mode, PHASE_INFO["idle"]))
         return PHASE_INFO.get(mode, PHASE_INFO["idle"])
 
     # ── Broadcast loops ──────────────────────────────────────────────

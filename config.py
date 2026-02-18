@@ -62,8 +62,17 @@ class RecordingConfig:
 
 
 @dataclass
+class TetrisScreenConfig:
+    board_left: int = 0
+    board_top: int = 0
+    board_width: int = 300
+    board_height: int = 600
+    key_calibration_path: str = "tetris_key_calibration.json"
+
+
+@dataclass
 class AliceConfig:
-    mode: str = "tetris"
+    mode: str = "idle"
     simulate: bool = True
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
     overhead_camera: CameraConfigYaml = field(default_factory=lambda: CameraConfigYaml(
@@ -76,6 +85,7 @@ class AliceConfig:
     narration: NarrationConfig = field(default_factory=NarrationConfig)
     selftest: SelfTestConfig = field(default_factory=SelfTestConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
+    tetris_screen: TetrisScreenConfig = field(default_factory=TetrisScreenConfig)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -182,8 +192,17 @@ def _dict_to_config(data: dict) -> AliceConfig:
         output_dir=rec_data.get("output_dir", "recordings"),
     )
 
+    ts_data = data.get("tetris_screen", {})
+    tetris_screen = TetrisScreenConfig(
+        board_left=ts_data.get("board_left", 0),
+        board_top=ts_data.get("board_top", 0),
+        board_width=ts_data.get("board_width", 300),
+        board_height=ts_data.get("board_height", 600),
+        key_calibration_path=ts_data.get("key_calibration_path", "tetris_key_calibration.json"),
+    )
+
     return AliceConfig(
-        mode=data.get("mode", "tetris"),
+        mode=data.get("mode", "idle"),
         simulate=data.get("simulate", True),
         hardware=hardware,
         overhead_camera=overhead_camera,
@@ -192,6 +211,7 @@ def _dict_to_config(data: dict) -> AliceConfig:
         narration=narration,
         selftest=selftest,
         recording=recording,
+        tetris_screen=tetris_screen,
     )
 
 

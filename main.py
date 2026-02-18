@@ -15,7 +15,8 @@ from hardware import (ArmController, MagnetDriver, CalibrationManager,
 from vision import (CameraManager, CameraConfig, CameraRole, CameraHealth,
                     ArucoDetector, BlockTracker)
 from brain import InferencePipeline
-from logic import ChimpSortFSM, SortState, TetrisAgent
+from logic import ChimpSortFSM, SortState, TetrisAgent, TetrisController
+from logic.arm_routines import auto_scramble, auto_solve, PickPlaceConfig
 from server import TensorStreamServer
 from puppet_server import PuppetServer
 from audience_server import AudienceServer
@@ -32,8 +33,9 @@ RL_AGENT_PATH = Path(__file__).parent / "brain" / "weights" / "sort_agent.zip"
 
 class Mode(Enum):
     IDLE = "idle"
-    CHIMP_SORT = "chimp"
-    TETRIS = "tetris"
+    AUTO_SORT = "auto_sort"
+    AUTO_TETRIS = "auto_tetris"
+    DEMO = "demo"
     CALIBRATE = "calibrate"
     PUPPETEER = "puppeteer"
 
@@ -174,14 +176,15 @@ class ALICE:
 
     def _setup_mode(self, mode: Mode) -> None:
         """Initialize subsystems for a given mode."""
-        if mode == Mode.CHIMP_SORT:
+        if mode in (Mode.AUTO_SORT, Mode.DEMO):
             self.sort_fsm = ChimpSortFSM()
             self.sort_fsm.on_state_change(self._on_sort_state_change)
             self.sort_fsm.on_move(self._on_block_move)
 
-        elif mode == Mode.TETRIS:
+        elif mode == Mode.AUTO_TETRIS:
             self.tetris = TetrisAgent()
             self.tetris.on_action(self._on_tetris_action)
+            self._tetris_controller = self._create_tetris_controller()
 
         elif mode == Mode.PUPPETEER:
             hw = self.config.hardware
@@ -197,6 +200,9 @@ class ALICE:
         if self.puppeteer:
             self.puppeteer.stop()
             self.puppeteer = None
+        if hasattr(self, '_tetris_controller') and self._tetris_controller:
+            self._tetris_controller.stop()
+            self._tetris_controller = None
         self.sort_fsm = None
         self.tetris = None
 
@@ -271,10 +277,12 @@ class ALICE:
             try:
                 if self.mode == Mode.IDLE:
                     await self._run_idle()
-                elif self.mode == Mode.CHIMP_SORT:
-                    await self._run_chimp_sort()
-                elif self.mode == Mode.TETRIS:
-                    await self._run_tetris()
+                elif self.mode == Mode.AUTO_SORT:
+                    await self._run_auto_sort()
+                elif self.mode == Mode.AUTO_TETRIS:
+                    await self._run_auto_tetris()
+                elif self.mode == Mode.DEMO:
+                    await self._run_demo()
                 elif self.mode == Mode.CALIBRATE:
                     await self._run_calibration()
                 elif self.mode == Mode.PUPPETEER:
@@ -295,31 +303,126 @@ class ALICE:
                 self.inference.predict(frame)
             await asyncio.sleep(0.1)
 
-    async def _run_chimp_sort(self) -> None:
+    # ── Auto Sort (passive attractor) ────────────────────────────────
+
+    async def _run_auto_sort(self) -> None:
+        """Autonomous scramble -> solve -> pause -> repeat loop."""
         current_mode = self.mode
+        cycle = 0
+
+        while self._running and self.mode == current_mode:
+            cycle += 1
+            logger.info(f"Auto-sort cycle {cycle}: scrambling...")
+            self.state_manager.update_auto_sort("scrambling", cycle)
+            self.sort_fsm.start_rebellion()  # Use rebellion state for autonomous solving
+            self.state_manager.update_sort_state("scrambling")
+
+            camera_getter = lambda: self.cameras.get_frame(CameraRole.OVERHEAD)
+            running = lambda: self._running and self.mode == current_mode
+
+            await auto_scramble(
+                self.arm, self.gripper, self.calibration,
+                self.detector, camera_getter,
+                running_check=running,
+            )
+            if not self._running or self.mode != current_mode:
+                break
+
+            logger.info(f"Auto-sort cycle {cycle}: solving...")
+            self.state_manager.update_auto_sort("solving", cycle)
+            self.state_manager.update_sort_state("rebellion")
+
+            await auto_solve(
+                self.arm, self.gripper, self.calibration,
+                self.detector, camera_getter, self.sort_fsm,
+                running_check=running,
+            )
+            if not self._running or self.mode != current_mode:
+                break
+
+            logger.info(f"Auto-sort cycle {cycle} complete")
+            self.state_manager.update_auto_sort("complete", cycle)
+
+            # Pause before next cycle
+            for _ in range(30):  # ~3 seconds
+                if not self._running or self.mode != current_mode:
+                    return
+                await asyncio.sleep(0.1)
+
+    # ── Auto Tetris (passive attractor) ───────────────────────────────
+
+    def _create_tetris_controller(self) -> 'TetrisController':
+        """Create a TetrisController from config."""
+        from vision.screen_reader import ScreenReader, ScreenRegion
+        from hardware.keyboard_player import KeyboardPlayer
+        from pathlib import Path
+
+        ts = self.config.tetris_screen
+        region = ScreenRegion(
+            left=ts.board_left, top=ts.board_top,
+            width=ts.board_width, height=ts.board_height,
+        )
+        reader = ScreenReader(region)
+        player = KeyboardPlayer(self.arm, Path(ts.key_calibration_path))
+        return TetrisController(reader, player, self.tetris)
+
+    async def _run_auto_tetris(self) -> None:
+        """Arm plays tetr.io on a physical keyboard via screen capture."""
+        current_mode = self.mode
+        logger.info("Auto-Tetris: arm plays tetr.io on physical keyboard")
+
+        if not hasattr(self, '_tetris_controller') or self._tetris_controller is None:
+            self._tetris_controller = self._create_tetris_controller()
+
+        running = lambda: self._running and self.mode == current_mode
+        await self._tetris_controller.run_loop(running_check=running)
+
+        logger.info(f"Auto-Tetris ended: {self._tetris_controller.cycles} cycles, "
+                     f"{self._tetris_controller.total_keys_pressed} keys")
+
+    # ── Demo (5-act show) ─────────────────────────────────────────────
+
+    async def _run_demo(self) -> None:
+        """Full 5-act demo: human -> ghost -> puppet -> cyborg -> rebellion.
+
+        Auto-scramble is inserted before Acts 1, 4, and 5 so the operator
+        doesn't have to manually reset blocks.
+        """
+        current_mode = self.mode
+        camera_getter = lambda: self.cameras.get_frame(CameraRole.OVERHEAD)
+        running = lambda: self._running and self.mode == current_mode
 
         # ── Resuming after puppeteer interlude? Skip to Act 4 ──
         if self._sort_act >= 3:
             self._sort_act = 4
-            await self._run_sort_act4_and_5(current_mode)
+            await self._run_demo_act4_and_5(current_mode)
+            return
+
+        # ── Auto-scramble before Act 1 ──
+        logger.info("Demo: scrambling blocks before Act 1")
+        self.state_manager.update_demo_act(0, "Scrambling")
+        self.state_manager.update_sort_state("scrambling")
+        await auto_scramble(self.arm, self.gripper, self.calibration,
+                            self.detector, camera_getter, running_check=running)
+        if not running():
             return
 
         # ── Act 1: Human Benchmark ──
-        # "The human thinks. The machine watches."
         logger.info("Act 1: Human Benchmark — sort the blocks!")
+        self.state_manager.update_demo_act(1, "Human Benchmark")
         self.sort_fsm.start_human_benchmark()
         self._human_session = await self._sort_loop(current_mode)
-        if not self._running or self.mode != current_mode:
+        if not running():
             return
 
         # ── Act 2: Ghost Replay ──
-        # "The machine remembers."
         if self._human_session and self._human_session.moves:
             logger.info(f"Act 2: Ghost Replay — replaying {len(self._human_session.moves)} moves")
+            self.state_manager.update_demo_act(2, "Ghost Replay")
             self.sort_fsm.start_ghost_replay(self._human_session)
             self.state_manager.update_sort_state("ghost_replay")
             for move in self._human_session.moves:
-                if not self._running or self.mode != current_mode:
+                if not running():
                     return
                 angles = self.calibration.pixel_to_arm(move.to_pos[0], move.to_pos[1])
                 self.arm.move_to(angles)
@@ -330,30 +433,49 @@ class ALICE:
             logger.info("Ghost replay complete")
 
         # ── Interlude: Await Puppeteer (Act 3) ──
-        # "The human extends through the machine."
-        # Operator switches to puppeteer mode for the volunteer demo, then back.
         self._sort_act = 3
-        logger.info("Acts 1-2 complete. Switch to PUPPETEER mode for Act 3, then back to CHIMP for Acts 4-5.")
+        logger.info("Acts 1-2 complete. Switch to PUPPETEER mode for Act 3, then back to DEMO for Acts 4-5.")
+        self.state_manager.update_demo_act(3, "Puppeteer")
         self.state_manager.update_sort_state("awaiting_puppeteer")
 
         # Hold here until operator switches away
         while self._running and self.mode == current_mode:
             await asyncio.sleep(0.25)
 
-    async def _run_sort_act4_and_5(self, current_mode: Mode) -> None:
-        """Acts 4 and 5 of the sort demo, entered after puppeteer interlude."""
+    async def _run_demo_act4_and_5(self, current_mode: Mode) -> None:
+        """Acts 4 and 5 of the demo, entered after puppeteer interlude."""
+        camera_getter = lambda: self.cameras.get_frame(CameraRole.OVERHEAD)
+        running = lambda: self._running and self.mode == current_mode
+
+        # ── Auto-scramble before Act 4 ──
+        logger.info("Demo: scrambling blocks before Act 4")
+        self.state_manager.update_demo_act(4, "Scrambling")
+        self.state_manager.update_sort_state("scrambling")
+        await auto_scramble(self.arm, self.gripper, self.calibration,
+                            self.detector, camera_getter, running_check=running)
+        if not running():
+            return
 
         # ── Act 4: Cyborg Cooperation ──
-        # "The crowd and the machine negotiate."
         logger.info("Act 4: Cyborg Cooperation — human + robot + audience!")
+        self.state_manager.update_demo_act(4, "Cyborg Coop")
         self.sort_fsm.start_cyborg_coop()
         await self._sort_loop(current_mode)
-        if not self._running or self.mode != current_mode:
+        if not running():
+            return
+
+        # ── Auto-scramble before Act 5 ──
+        logger.info("Demo: scrambling blocks before Act 5")
+        self.state_manager.update_demo_act(5, "Scrambling")
+        self.state_manager.update_sort_state("scrambling")
+        await auto_scramble(self.arm, self.gripper, self.calibration,
+                            self.detector, camera_getter, running_check=running)
+        if not running():
             return
 
         # ── Act 5: Rebellion ──
-        # "We gave it permission to ignore us."
         logger.info("Act 5: Rebellion — ALICE sorts optimally, audience overridden")
+        self.state_manager.update_demo_act(5, "Rebellion")
         self.sort_fsm.start_rebellion()
         self.state_manager.update_sort_state("rebellion")
         await self._rebellion_loop(current_mode)
@@ -361,6 +483,7 @@ class ALICE:
         # Done — reset for next demo
         self._sort_act = 0
         self._human_session = None
+        self.state_manager.update_demo_act(0, "")
 
     async def _sort_loop(self, current_mode) -> Optional['SortingSession']:
         """Shared detection/tracking/state loop for human benchmark and cyborg phases."""
@@ -495,35 +618,6 @@ class ALICE:
                 self.gripper.open()
 
             await asyncio.sleep(0.016)
-
-    async def _run_tetris(self) -> None:
-        self.tetris.reset()
-        current_mode = self.mode
-
-        while self._running and self.mode == current_mode:
-            if self.tetris.state and self.tetris.state.game_over:
-                break
-
-            frame = self.cameras.get_frame(CameraRole.OVERHEAD)
-            if frame is not None and not self.inference.is_frozen:
-                _, _, activations = self.inference.predict(frame)
-                if self.recorder.is_recording:
-                    self.recorder.record_neural(self.inference.get_all_layer_stats())
-
-            action = self.tetris.step()
-
-            if self.tetris.state:
-                self.state_manager.update_tetris_score(self.tetris.state.score)
-                self.state_manager.update_tetris_state(
-                    lines_cleared=self.tetris.state.lines_cleared,
-                    level=self.tetris.state.level,
-                    game_over=self.tetris.state.game_over,
-                    board=self.tetris.get_board_list(),
-                )
-
-            await asyncio.sleep(0.1)
-
-        logger.info(f"Game over! Score: {self.tetris.state.score if self.tetris.state else 0}")
 
     async def _run_calibration(self) -> None:
         logger.info("Calibration mode - press 'q' to quit")
@@ -665,7 +759,7 @@ class ALICE:
 async def main():
     parser = argparse.ArgumentParser(description="A.L.I.C.E. - Adaptive Learning Interface for Cognitive Exploration")
     parser.add_argument("--config", type=str, default=None, help="Path to alice.yaml config file")
-    parser.add_argument("--mode", type=str, choices=["idle", "chimp", "tetris", "calibrate", "puppeteer"], default=None)
+    parser.add_argument("--mode", type=str, choices=["idle", "auto_sort", "auto_tetris", "demo", "calibrate", "puppeteer"], default=None)
     parser.add_argument("--simulate", action="store_true", default=None)
     parser.add_argument("--ws-port", type=int, default=None)
     parser.add_argument("--arm-port", type=str, default=None, help="Serial port for arm controller")

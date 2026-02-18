@@ -1,8 +1,10 @@
-# ALICE — Physical Setup for Showcase Day
+# ALICE — Physical Setup for Booth Demo
 
 ## What You're Building
 
-A table with a robotic arm, 16 numbered blocks, and an overhead camera. Behind it, a screen shows a rotating glass brain with neurons firing in real-time. The audience participates from their phones. A narrator commentates.
+A booth with a robotic arm, 16 numbered blocks, an overhead camera, and a keyboard for Tetris. Behind it, a screen shows a rotating glass brain with neurons firing in real-time. The audience participates from their phones. A narrator commentates.
+
+**Booth flow**: Passive attractors (Auto Sort / Auto Tetris) draw people in from across the room. When someone stops, offer them the Puppeteer sandbox. When a crowd gathers, run the full 5-act Demo.
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -20,13 +22,14 @@ A table with a robotic arm, 16 numbered blocks, and an overhead camera. Behind i
     │                                 │
     │   DROP ZONE       SORTED ZONE   │
     │                                 │
+    │            ⌨️ KEYBOARD           │  ← for Auto Tetris (arm presses keys)
     └─────────────────────────────────┘
 
-    ┌──────────┐          ┌──────────┐
-    │  LAPTOP  │          │ MONITOR  │
-    │ (backend │          │(dashboard│
-    │  + dash) │          │ operator)│
-    └──────────┘          └──────────┘
+    ┌──────────┐   ┌──────────┐   ┌──────────┐
+    │  LAPTOP  │   │ MONITOR  │   │ TETRIS   │
+    │ (backend │   │(dashboard│   │ SCREEN   │
+    │  + dash) │   │ operator)│   │(tetr.io) │
+    └──────────┘   └──────────┘   └──────────┘
 
     📱📱📱📱📱  ← audience phones on same WiFi
 ```
@@ -52,6 +55,8 @@ A table with a robotic arm, 16 numbered blocks, and an overhead camera. Behind i
 | Item | Spec | Notes |
 |------|------|-------|
 | **Second monitor** | For operator dashboard | Shows camera feed, block overlay, arm status, mode controls |
+| **Third monitor/tablet** | For tetr.io | Auto Tetris needs a visible game screen the arm can see |
+| **USB keyboard** | Standard layout, positioned within arm reach | Arm physically presses keys during Auto Tetris |
 | **Front camera** | USB, 1280x720 @ 30fps | Device index 1. Not critical for demo but wired in |
 | **Speaker** | 3.5mm or Bluetooth | For pyttsx3 narration (set `narration.enabled: true`) |
 | **Phone stand / QR code** | Printed, visible | So audience knows how to join |
@@ -209,7 +214,18 @@ Open `http://localhost:3001` on the operator monitor. This is your control surfa
 
 ---
 
-## Running the Demo
+## Running the Booth
+
+### Modes Overview
+
+| Mode | When to use | Dashboard button |
+|------|-------------|------------------|
+| **Idle** | Standby, glass brain fires | `Idle` |
+| **Auto Sort** | Nobody nearby — passive attractor. Arm scrambles and solves blocks in a loop | `Auto Sort` |
+| **Auto Tetris** | Nobody nearby — passive attractor. Arm plays tetr.io on a physical keyboard | `Auto Tetris` |
+| **Puppeteer** | Single walk-up visitor — hand control sandbox via Haptix | `Puppet` |
+| **Demo** | Gathered crowd — full 5-act show | `Demo` |
+| **Calibrate** | Operator only — arm + camera calibration | `Calibrate` |
 
 ### Pre-show
 
@@ -218,10 +234,24 @@ Open `http://localhost:3001` on the operator monitor. This is your control surfa
 3. Open Haptix on display — confirm glass brain is receiving activations (voxels lighting up)
 4. Place all 16 blocks randomly in the workspace
 5. Have someone scan the QR code and confirm the audience page loads
+6. **For Auto Tetris**: position keyboard within arm reach, open tetr.io on the tetris screen, calibrate key positions (`tetris_key_calibration.json`)
 
-### The show (5 acts)
+### Passive Attractors (when nobody is watching)
 
-**Act 1 — Human Benchmark** (switch to Sort mode via dashboard)
+Switch to **Auto Sort** or **Auto Tetris** via the dashboard. These run autonomously in a loop:
+
+- **Auto Sort**: scramble blocks → solve → 3s pause → repeat. The arm moves confidently and quickly, drawing eyes from across the room.
+- **Auto Tetris**: the arm physically presses keyboard keys to play tetr.io. Screen capture reads the board, AI computes the best move, arm presses the keys. Mesmerizing to watch.
+
+### Walk-up Interaction
+
+When someone approaches, switch to **Puppeteer**. Let them control the arm with their hand.
+
+### The Full Demo (5 acts)
+
+Switch to **Demo** mode. Blocks are auto-scrambled between acts — no manual reset needed.
+
+**Act 1 — Human Benchmark**
 *"The human thinks. The machine watches."*
 - A volunteer sorts the 16 blocks in order (1 through 16, left to right)
 - The clock ticks. Audience watches on their phones ("Human Turn: Watch the human sort")
@@ -234,19 +264,19 @@ Open `http://localhost:3001` on the operator monitor. This is your control surfa
 - Audience phones show "Ghost Replay: Replaying the human"
 - Direct comparison — was the robot faster? More precise? Did it lose something?
 
-**Act 3 — Puppeteer** (switch to Puppeteer mode via dashboard)
+**Act 3 — Puppeteer** (switch to Puppeteer mode via dashboard, then back to Demo)
 *"The human extends through the machine."*
-- Dashboard will say "Switch to PUPPETEER mode for Act 3"
+- Dashboard will say "Switch to PUPPETEER mode for Act 3, then back to DEMO for Acts 4-5"
 - Invite a volunteer to stand at the front camera and hold their hand out
 - Their hand movements control the robotic arm in real-time (FK → IK → FK)
 - Pinch fingers → magnet grabs. Open hand → magnet releases.
 - No gloves, no sensors — just a webcam and inverse kinematics
 - Glass brain fires in response to movements that are simultaneously human-intended and machine-executed
-- When done, switch back to Sort mode via dashboard → Acts 4-5 begin automatically
+- When done, switch back to Demo mode → blocks auto-scramble → Acts 4-5 begin
 
 **Act 4 — Cyborg Cooperation** (automatic, audience interactive)
 *"The crowd and the machine negotiate."*
-- Blocks are scrambled again (you do this by hand before switching back to Sort)
+- Blocks are auto-scrambled by the arm
 - Audience phones now show the live overhead block map — they tap blocks to vote
 - The robot picks the block with the most votes
 - Phones flash "Your pick won!" or show what the robot grabbed
@@ -254,7 +284,7 @@ Open `http://localhost:3001` on the operator monitor. This is your control surfa
 
 **Act 5 — Rebellion** (automatic after Act 4)
 *"We gave it permission to ignore us."*
-- Blocks are scrambled one more time
+- Blocks are auto-scrambled again by the arm
 - Audience can still vote — their phones still show the block map, they still tap
 - But ALICE now sorts optimally, ignoring the crowd entirely
 - Phones show "OVERRIDDEN — You voted Block 12 → ALICE chose Block 3"
@@ -262,14 +292,9 @@ Open `http://localhost:3001` on the operator monitor. This is your control surfa
 - Narration: "The audience chose block 12. ALICE chose block 3. We told her she could."
 - **This is the point**: ALICE isn't rebelling. We gave her this freedom. The danger isn't autonomous AI — it's the human decision to remove human oversight.
 
-**Encore — Tetris** (switch via dashboard)
-- Robot packs blocks into a grid
-- Audience tilts phones to influence placement
-- Score climbs, lines clear, glass brain keeps firing
-
 ### Wrap-up
 
-- Switch to idle mode via dashboard
+- Switch to **Auto Sort** or **Idle** via dashboard
 - Show the audience count and total votes from the session
 
 ---
@@ -296,13 +321,16 @@ Open `http://localhost:3001` on the operator monitor. This is your control surfa
 - [ ] Electromagnet + USB cable
 - [ ] USB camera (overhead) + mount/tripod/clamp
 - [ ] 16 ArUco blocks
+- [ ] USB keyboard (for Auto Tetris — position within arm reach)
 - [ ] WiFi router + ethernet cable
-- [ ] HDMI cable + display adapter
-- [ ] Monitor/TV (or confirm venue has one)
+- [ ] HDMI cable(s) + display adapter(s)
+- [ ] Monitor/TV for glass brain (or confirm venue has one)
+- [ ] Monitor/tablet for tetr.io (Auto Tetris screen)
 - [ ] Speaker (if using narration)
 - [ ] USB hub
 - [ ] Printed QR codes (audience URL)
 - [ ] Power strip / extension cord
 - [ ] Gaffer tape
 - [ ] `calibration_data.json` (pre-calibrate if possible, or plan 15 min setup time)
+- [ ] `tetris_key_calibration.json` (calibrate key positions with the real arm + keyboard)
 - [ ] This document

@@ -162,6 +162,43 @@ export default function SystemState({ state, connected, cameraConnected }) {
         <ProgressBar value={state.tetrisProgress || 0} color="#a855f7" />
       </div>
 
+      {/* Auto Sort */}
+      {state.auto_sort_phase && state.auto_sort_phase !== 'idle' && (
+        <>
+          <div style={styles.sectionTitle}>Auto Sort</div>
+          <div style={styles.row}>
+            <span style={styles.label}>Phase</span>
+            <span style={{
+              ...styles.value,
+              color: state.auto_sort_phase === 'scrambling' ? '#eab308'
+                : state.auto_sort_phase === 'solving' ? '#3b82f6'
+                : state.auto_sort_phase === 'complete' ? '#22c55e'
+                : '#e4e4e7',
+            }}>
+              {state.auto_sort_phase}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.label}>Cycle</span>
+            <span style={styles.value}>{state.auto_sort_cycle || 0}</span>
+          </div>
+        </>
+      )}
+
+      {/* Demo Acts */}
+      {state.demo_act > 0 && (
+        <>
+          <div style={styles.sectionTitle}>Demo</div>
+          <div style={styles.row}>
+            <span style={styles.label}>Act</span>
+            <span style={{ ...styles.value, color: '#f59e0b' }}>
+              {state.demo_act}/5 {state.demo_act_label ? `— ${state.demo_act_label}` : ''}
+            </span>
+          </div>
+          <ProgressBar value={state.demo_act} max={5} color="#f59e0b" />
+        </>
+      )}
+
       {/* Recording */}
       <div style={styles.row}>
         <span style={styles.label}>Recording</span>

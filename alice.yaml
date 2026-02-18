@@ -1,7 +1,7 @@
 # A.L.I.C.E. Configuration
 # Adaptive Learning Interface for Cognitive Exploration
 
-mode: tetris
+mode: idle
 simulate: true
 
 hardware:
@@ -46,3 +46,10 @@ selftest:
 recording:
   enabled: false
   output_dir: recordings
+
+tetris_screen:
+  board_left: 0
+  board_top: 0
+  board_width: 300
+  board_height: 600
+  key_calibration_path: tetris_key_calibration.json
