@@ -59,7 +59,8 @@ class ArucoDetector:
             
             perimeter = cv2.arcLength(corner_pts.astype(np.float32), True)
             expected_perimeter = 4 * self._marker_size_mm
-            confidence = min(1.0, expected_perimeter / max(1, abs(perimeter - expected_perimeter)))
+            error_ratio = abs(perimeter - expected_perimeter) / expected_perimeter
+            confidence = max(0.0, 1.0 - error_ratio)
             
             block = BlockData(
                 block_id=self.MARKER_TO_BLOCK[marker_id],

@@ -47,7 +47,10 @@ class ArmController:
     MAX_RECONNECT_ATTEMPTS = 5
     RECONNECT_BASE_DELAY = 0.5
 
-    def __init__(self, port: str = "COM3", baudrate: int = 115200, simulate: bool = False):
+    def __init__(self, port: str = None, baudrate: int = 115200, simulate: bool = False):
+        if port is None:
+            from .port_config import get_serial_port
+            port = get_serial_port("arm")
         self.port = port
         self.baudrate = baudrate
         self.simulate = simulate or not SERIAL_AVAILABLE

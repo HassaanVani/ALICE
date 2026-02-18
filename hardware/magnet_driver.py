@@ -15,7 +15,10 @@ class MagnetState(Enum):
 
 
 class MagnetDriver:
-    def __init__(self, port: str = "COM3", pin: int = 13, simulate: bool = False):
+    def __init__(self, port: str = None, pin: int = 13, simulate: bool = False):
+        if port is None:
+            from .port_config import get_serial_port
+            port = get_serial_port("magnet")
         self.port = port
         self.pin = pin
         self.simulate = simulate or not SERIAL_AVAILABLE

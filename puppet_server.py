@@ -35,11 +35,19 @@ class PuppetServer:
         
         self._last_angles: tuple = (90, 90, 90, 90, 90)
         self._frame_count = 0
-    
+        self._arm_port: Optional[str] = None
+        self._magnet_port: Optional[str] = None
+
     def initialize(self) -> bool:
         try:
-            self.arm = ArmController(simulate=self.simulate)
-            self.magnet = MagnetDriver(simulate=self.simulate)
+            arm_kwargs = {"simulate": self.simulate}
+            magnet_kwargs = {"simulate": self.simulate}
+            if self._arm_port:
+                arm_kwargs["port"] = self._arm_port
+            if self._magnet_port:
+                magnet_kwargs["port"] = self._magnet_port
+            self.arm = ArmController(**arm_kwargs)
+            self.magnet = MagnetDriver(**magnet_kwargs)
             self.mapper = HandToArmMapper()
             self.gesture = GestureToGripper()
             self.recorder = TeachingRecorder(self.mapper)
@@ -208,9 +216,15 @@ async def main():
     parser.add_argument("--host", type=str, default="localhost")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--simulate", action="store_true", default=True)
+    parser.add_argument("--arm-port", type=str, default=None, help="Serial port for arm controller")
+    parser.add_argument("--magnet-port", type=str, default=None, help="Serial port for magnet driver")
     args = parser.parse_args()
-    
+
     server = PuppetServer(args.host, args.port, args.simulate)
+    if args.arm_port:
+        server._arm_port = args.arm_port
+    if args.magnet_port:
+        server._magnet_port = args.magnet_port
     
     try:
         await server.start()
