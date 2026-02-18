@@ -12,7 +12,7 @@ ALICE is a modular robotics AI system that integrates computer vision, decision-
 - **Logic Engine** — Decision-making system for autonomous behavior
 - **Hardware Control** — Direct interface with motors, sensors, and actuators
 - **Puppet Mode** — Teleoperation server for remote control and data collection
-- **Taptic Integration** — Gesture-based control interface
+- **Haptix Integration** — Gesture-based control interface
 
 ## Tech Stack
 
