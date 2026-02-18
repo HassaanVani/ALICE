@@ -515,3 +515,6 @@ export function createMoleculeMaker(THREE) {
         isInteractive: true
     };
 }
+
+export const metadata = { name: "Molecule Maker", category: "Interactive", description: "Build molecules by hand", interactive: true };
+export default (THREE) => createMoleculeMaker(THREE);

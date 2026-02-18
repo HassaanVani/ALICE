@@ -61,3 +61,18 @@ def list_serial_ports() -> list[str]:
         return [p.device for p in list_ports.comports()]
     except ImportError:
         return []
+
+
+def get_serial_port_from_config(device: str, config) -> str:
+    """Resolve serial port using AliceConfig, falling back to defaults."""
+    if config is not None:
+        hw = config.hardware
+        port_map = {
+            "arm": hw.arm_port,
+            "magnet": hw.magnet_port,
+            "imu": hw.imu_port,
+        }
+        port = port_map.get(device)
+        if port:
+            return port
+    return get_serial_port(device)

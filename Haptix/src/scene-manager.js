@@ -37,8 +37,16 @@ export class SceneManager {
         this.cursorData = data;
     }
 
-    registerScene(name, sceneBuilder) {
+    registerScene(name, sceneBuilder, metadata = null) {
         this.scenes[name] = sceneBuilder;
+        if (metadata) {
+            if (!this.sceneMetadata) this.sceneMetadata = {};
+            this.sceneMetadata[name] = metadata;
+        }
+    }
+
+    getSceneMetadata(name) {
+        return this.sceneMetadata?.[name] || null;
     }
 
     async switchScene(name) {

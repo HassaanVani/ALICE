@@ -250,3 +250,6 @@ export function createUIDemo(THREE) {
         isInteractive: true
     };
 }
+
+export const metadata = { name: "2D Interface", category: "Interactive", description: "UI interaction demo", interactive: true };
+export default (THREE) => createUIDemo(THREE);

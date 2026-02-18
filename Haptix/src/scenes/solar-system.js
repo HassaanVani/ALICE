@@ -94,3 +94,6 @@ export function createSolarSystemScene(THREE) {
         maxDistance: 80
     };
 }
+
+export const metadata = { name: "Solar System", category: "Space", description: "Interactive solar system model", interactive: false };
+export default (THREE) => createSolarSystemScene(THREE);

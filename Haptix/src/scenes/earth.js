@@ -165,3 +165,6 @@ export function createEarthScene(THREE) {
         maxDistance: 60
     };
 }
+
+export const metadata = { name: "Earth", category: "Space", description: "Planet Earth visualization", interactive: false };
+export default (THREE) => createEarthScene(THREE);

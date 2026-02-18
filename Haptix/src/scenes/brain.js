@@ -230,3 +230,6 @@ export function createBrainScene(THREE) {
         maxDistance: 15
     };
 }
+
+export const metadata = { name: "Brain", category: "Science", description: "Human brain visualization", interactive: false };
+export default (THREE) => createBrainScene(THREE);

@@ -172,3 +172,6 @@ export function createCellScene(THREE) {
         maxDistance: 50
     };
 }
+
+export const metadata = { name: "Cell", category: "Science", description: "Biological cell cross-section", interactive: false };
+export default (THREE) => createCellScene(THREE);

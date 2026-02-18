@@ -200,9 +200,26 @@ class ArmController:
             self._state = ArmState.ERROR
             self.reconnect()
     
+    def set_compliant(self, enabled: bool) -> None:
+        """Put arm into compliant (torque-off) mode for kinesthetic teaching."""
+        if self.simulate:
+            logger.info(f"Compliance {'enabled' if enabled else 'disabled'} (simulated)")
+            return
+
+        if not self._serial or not self._serial.is_open:
+            return
+
+        try:
+            cmd = f"TORQUE:{'0' if enabled else '1'}\n"
+            self._serial.write(cmd.encode())
+            self._serial.flush()
+            logger.info(f"Compliance {'enabled' if enabled else 'disabled'}")
+        except Exception as e:
+            logger.error(f"Failed to set compliance: {e}")
+
     def __enter__(self) -> "ArmController":
         self.connect()
         return self
-    
+
     def __exit__(self, *args) -> None:
         self.disconnect()

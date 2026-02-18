@@ -164,3 +164,6 @@ export function createMarsScene(THREE) {
         maxDistance: 30
     };
 }
+
+export const metadata = { name: "Mars", category: "Space", description: "Mars surface view", interactive: false };
+export default (THREE) => createMarsScene(THREE);

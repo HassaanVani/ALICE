@@ -2,20 +2,7 @@ import './styles.css';
 import { HandTracker } from './hand-tracker.js';
 import { GestureController } from './gesture-controller.js';
 import { SceneManager } from './scene-manager.js';
-import { createSolarSystemScene } from './scenes/solar-system.js';
-import { createGoldAtomScene } from './scenes/gold-atom.js';
-import { createBrainScene } from './scenes/brain.js';
-import { createMarsScene } from './scenes/mars.js';
-import { createDNAScene } from './scenes/dna.js';
-import { createBlackHoleScene } from './scenes/black-hole.js';
-import { createCellScene } from './scenes/cell.js';
-import { createGalaxyScene } from './scenes/galaxy.js';
-import { createEarthScene } from './scenes/earth.js';
-import { createUIDemo } from './scenes/ui-demo.js';
-import { createParticleRoom } from './scenes/particle-room.js';
-import { createCustomModelScene } from './scenes/custom-model.js';
-import { createMoleculeMaker } from './scenes/molecule-maker.js';
-import { createGlassBrainScene } from './scenes/glass-brain.js';
+import { SceneRegistry } from './scene-registry.js';
 import { TensorBridge } from './tensor-bridge.js';
 import { PuppetBridge } from './puppet-bridge.js';
 
@@ -29,6 +16,7 @@ class App {
         this.glassBrainScene = null;
         this.puppetBridge = null;
         this.puppetModeActive = false;
+        this.registry = new SceneRegistry();
     }
 
     async init() {
@@ -40,24 +28,26 @@ class App {
         const gestureText = document.getElementById('gesture-text');
 
         this.sceneManager = new SceneManager(canvas);
-        this.sceneManager.registerScene('solar-system', createSolarSystemScene);
-        this.sceneManager.registerScene('gold-atom', createGoldAtomScene);
-        this.sceneManager.registerScene('brain', createBrainScene);
-        this.sceneManager.registerScene('mars', createMarsScene);
-        this.sceneManager.registerScene('dna', createDNAScene);
-        this.sceneManager.registerScene('black-hole', createBlackHoleScene);
-        this.sceneManager.registerScene('cell', createCellScene);
-        this.sceneManager.registerScene('galaxy', createGalaxyScene);
-        this.sceneManager.registerScene('earth', createEarthScene);
-        this.sceneManager.registerScene('ui-demo', createUIDemo);
-        this.sceneManager.registerScene('particle-room', createParticleRoom);
-        this.sceneManager.registerScene('molecule-maker', createMoleculeMaker);
-
         this.tensorBridge = new TensorBridge();
-        this.sceneManager.registerScene('glass-brain', (THREE) => {
-            this.glassBrainScene = createGlassBrainScene(THREE, this.tensorBridge);
-            return this.glassBrainScene;
-        });
+
+        // Discover and register all scenes dynamically
+        await this.registry.discoverScenes();
+        for (const scene of this.registry.getAll()) {
+            if (scene.id === 'glass-brain') {
+                this.sceneManager.registerScene(scene.id, (THREE) => {
+                    this.glassBrainScene = scene.factory(THREE, this.tensorBridge);
+                    return this.glassBrainScene;
+                }, scene.metadata);
+            } else {
+                this.sceneManager.registerScene(scene.id, scene.factory, scene.metadata);
+            }
+        }
+
+        // Build dropdown dynamically
+        const dropdownMenu = document.getElementById('dropdown-menu');
+        if (dropdownMenu) {
+            this.registry.buildDropdown(dropdownMenu);
+        }
 
         this.gestureController = new GestureController();
         this.cursorData = { visible: false, clicking: false, x: 0, y: 0 };
@@ -163,7 +153,6 @@ class App {
         const toggle = document.getElementById('dropdown-toggle');
         const menu = document.getElementById('dropdown-menu');
         const label = document.getElementById('current-scene-label');
-        const items = document.querySelectorAll('.dropdown-item:not(.upload-item)');
 
         toggle?.addEventListener('click', () => {
             menu.classList.toggle('hidden');
@@ -175,40 +164,46 @@ class App {
             }
         });
 
-        items.forEach((item) => {
-            item.addEventListener('click', async () => {
-                const sceneName = item.dataset.scene;
-                if (!sceneName || sceneName === this.currentScene) {
-                    menu?.classList.add('hidden');
-                    return;
-                }
+        // Delegate click events for dynamically generated items
+        menu?.addEventListener('click', async (e) => {
+            const item = e.target.closest('.dropdown-item:not(.upload-item)');
+            if (!item) return;
 
-                items.forEach(i => i.classList.remove('active'));
-                item.classList.add('active');
-                label.textContent = item.textContent;
+            const sceneName = item.dataset.scene;
+            if (!sceneName || sceneName === this.currentScene) {
                 menu?.classList.add('hidden');
+                return;
+            }
 
-                const isInteractive = sceneName === 'ui-demo' || sceneName === 'particle-room' || sceneName === 'molecule-maker';
-                this.gestureController.setInteractiveMode(isInteractive);
+            menu.querySelectorAll('.dropdown-item').forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+            label.textContent = item.textContent;
+            menu?.classList.add('hidden');
 
-                if (sceneName === 'glass-brain') {
-                    this.tensorBridge.connect();
-                } else {
-                    this.tensorBridge.disconnect();
-                }
+            const sceneEntry = this.registry.get(sceneName);
+            const isInteractive = sceneEntry?.metadata?.interactive || false;
+            this.gestureController.setInteractiveMode(isInteractive);
 
-                this.currentScene = sceneName;
-                await this.sceneManager.switchScene(sceneName);
-            });
+            if (sceneName === 'glass-brain') {
+                this.tensorBridge.connect();
+            } else {
+                this.tensorBridge.disconnect();
+            }
+
+            this.currentScene = sceneName;
+            await this.sceneManager.switchScene(sceneName);
         });
     }
 
     setupUpload() {
-        const uploadBtn = document.getElementById('upload-btn');
         const fileInput = document.getElementById('model-upload');
 
-        uploadBtn?.addEventListener('click', () => {
-            fileInput?.click();
+        // Re-bind upload button (dynamically generated)
+        document.getElementById('dropdown-menu')?.addEventListener('click', (e) => {
+            const uploadBtn = e.target.closest('#upload-btn');
+            if (uploadBtn) {
+                fileInput?.click();
+            }
         });
 
         fileInput?.addEventListener('change', async (e) => {
@@ -216,13 +211,9 @@ class App {
             if (!file) return;
 
             const url = URL.createObjectURL(file);
+            const { createCustomModelScene } = await import('./scenes/custom-model.js');
 
             this.sceneManager.registerScene('custom', (THREE) => createCustomModelScene(THREE, url));
-
-            document.querySelectorAll('.scenario-btn').forEach(b => b.classList.remove('active'));
-            uploadBtn.classList.add('active');
-            uploadBtn.querySelector('svg')?.remove();
-            uploadBtn.textContent = file.name.slice(0, 12) + (file.name.length > 12 ? '...' : '');
 
             this.currentScene = 'custom';
             await this.sceneManager.switchScene('custom');
@@ -248,19 +239,19 @@ class App {
         zoomSlider?.addEventListener('input', (e) => {
             const val = parseFloat(e.target.value);
             this.gestureController.setZoomSensitivity(val);
-            zoomValue.textContent = val.toFixed(1) + '×';
+            zoomValue.textContent = val.toFixed(1) + '\u00d7';
         });
 
         rotationSlider?.addEventListener('input', (e) => {
             const val = parseFloat(e.target.value);
             this.gestureController.setRotationSensitivity(val);
-            rotationValue.textContent = val.toFixed(1) + '×';
+            rotationValue.textContent = val.toFixed(1) + '\u00d7';
         });
 
         panSlider?.addEventListener('input', (e) => {
             const val = parseFloat(e.target.value);
             this.gestureController.setPanSensitivity(val);
-            panValue.textContent = val.toFixed(1) + '×';
+            panValue.textContent = val.toFixed(1) + '\u00d7';
         });
     }
 

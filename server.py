@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import Set, Optional
+from typing import Set, Optional, Callable
 
 try:
     import websockets
@@ -27,21 +27,43 @@ class TensorStreamServer:
         self._streaming = False
         self._fps = 30
         self._selected_layer: Optional[str] = None
-    
+        self._state_manager = None
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._switch_mode_callback: Optional[Callable[[str], None]] = None
+        self._camera_stream_clients: Set[WebSocketServerProtocol] = set()
+        self._camera_frame_getter: Optional[Callable] = None
+
     def set_pipeline(self, pipeline: InferencePipeline) -> None:
         self.pipeline = pipeline
-    
+
+    def set_state_manager(self, state_manager) -> None:
+        self._state_manager = state_manager
+
+    def set_switch_mode_callback(self, callback: Callable[[str], None]) -> None:
+        self._switch_mode_callback = callback
+
+    def set_camera_frame_getter(self, getter: Callable) -> None:
+        self._camera_frame_getter = getter
+
     async def register(self, websocket: WebSocketServerProtocol) -> None:
         self.clients.add(websocket)
         logger.info(f"Client connected. Total: {len(self.clients)}")
-    
+
+        # Send initial state sync
+        if self._state_manager:
+            try:
+                await websocket.send(self._state_manager.get_state_sync_message())
+            except Exception:
+                pass
+
     async def unregister(self, websocket: WebSocketServerProtocol) -> None:
         self.clients.discard(websocket)
+        self._camera_stream_clients.discard(websocket)
         logger.info(f"Client disconnected. Total: {len(self.clients)}")
-    
+
     async def handler(self, websocket: WebSocketServerProtocol) -> None:
         await self.register(websocket)
-        
+
         try:
             async for message in websocket:
                 await self._handle_message(message, websocket)
@@ -49,12 +71,12 @@ class TensorStreamServer:
             pass
         finally:
             await self.unregister(websocket)
-    
+
     async def _handle_message(self, message: str, websocket: WebSocketServerProtocol) -> None:
         try:
             data = json.loads(message)
             command = data.get("command")
-            
+
             if command == "freeze":
                 if self.pipeline:
                     frozen = data.get("frozen", False)
@@ -63,95 +85,162 @@ class TensorStreamServer:
                     else:
                         self.pipeline.unfreeze()
                     logger.info(f"Inference {'frozen' if frozen else 'unfrozen'}")
-            
+
             elif command == "select_layer":
                 self._selected_layer = data.get("layer")
                 logger.info(f"Selected layer: {self._selected_layer}")
-            
+
             elif command == "set_fps":
                 self._fps = max(1, min(60, data.get("fps", 30)))
                 logger.info(f"FPS set to: {self._fps}")
-            
+
             elif command == "get_layers":
                 if self.pipeline:
                     layers = self.pipeline.hooks.layer_names
                     await websocket.send(json.dumps({"type": "layers", "layers": layers}))
-        
+
+            elif command == "switch_mode":
+                new_mode = data.get("mode")
+                if new_mode and self._switch_mode_callback:
+                    try:
+                        self._switch_mode_callback(new_mode)
+                        await websocket.send(json.dumps({
+                            "type": "mode_switched",
+                            "mode": new_mode
+                        }))
+                    except Exception as e:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "detail": f"Mode switch failed: {e}"
+                        }))
+
+            elif command == "stream_camera":
+                self._camera_stream_clients.add(websocket)
+                logger.info("Camera streaming started for client")
+
+            elif command == "stop_camera":
+                self._camera_stream_clients.discard(websocket)
+
+            elif command == "get_state":
+                if self._state_manager:
+                    await websocket.send(self._state_manager.get_state_sync_message())
+
         except json.JSONDecodeError:
             pass
-    
+
     async def broadcast(self, data: bytes) -> None:
         if not self.clients:
             return
-        
+
         dead_clients = set()
-        
+
         for client in self.clients:
             try:
                 await client.send(data)
             except websockets.exceptions.ConnectionClosed:
                 dead_clients.add(client)
-        
+
         for client in dead_clients:
             self.clients.discard(client)
-    
+
     async def stream_loop(self) -> None:
         self._streaming = True
         interval = 1.0 / self._fps
-        
+
         while self._streaming:
             if self.clients and self.pipeline:
                 payload = self.pipeline.get_websocket_payload(self._selected_layer)
                 if payload:
                     await self.broadcast(payload)
-            
+
             await asyncio.sleep(interval)
-    
+
+    async def _heartbeat_loop(self) -> None:
+        """Send heartbeat every 5 seconds to all connected clients."""
+        while self._streaming:
+            if self.clients and self._state_manager:
+                msg = self._state_manager.heartbeat_message()
+                dead = set()
+                for client in self.clients.copy():
+                    try:
+                        await client.send(msg)
+                    except Exception:
+                        dead.add(client)
+                for c in dead:
+                    self.clients.discard(c)
+            await asyncio.sleep(5)
+
+    async def _camera_stream_loop(self) -> None:
+        """Stream JPEG frames at 15fps to requesting clients."""
+        import cv2
+        while self._streaming:
+            if self._camera_stream_clients and self._camera_frame_getter:
+                frame = self._camera_frame_getter()
+                if frame is not None:
+                    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    import base64
+                    b64 = base64.b64encode(buf).decode("ascii")
+                    msg = json.dumps({"type": "camera_frame", "jpeg_b64": b64})
+                    dead = set()
+                    for client in self._camera_stream_clients.copy():
+                        try:
+                            await client.send(msg)
+                        except Exception:
+                            dead.add(client)
+                    for c in dead:
+                        self._camera_stream_clients.discard(c)
+            await asyncio.sleep(1.0 / 15)  # 15 fps
+
     async def start(self) -> None:
         if not WEBSOCKETS_AVAILABLE:
             logger.error("websockets package not installed")
             return
-        
+
         self._server = await websockets.serve(
             self.handler,
             self.host,
             self.port
         )
-        
+
         logger.info(f"Tensor stream server started on ws://{self.host}:{self.port}")
-        
-        await asyncio.gather(
+
+        self._streaming = True
+        tasks = [
             self._server.wait_closed(),
-            self.stream_loop()
-        )
-    
+            self.stream_loop(),
+            self._heartbeat_loop(),
+            self._camera_stream_loop(),
+        ]
+        await asyncio.gather(*tasks)
+
     async def stop(self) -> None:
         self._streaming = False
-        
+
         if self._server:
             self._server.close()
             await self._server.wait_closed()
-        
+
         for client in self.clients.copy():
             await client.close()
-        
+
         self.clients.clear()
+        self._camera_stream_clients.clear()
         logger.info("Server stopped")
 
 
 async def main():
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="A.L.I.C.E. Tensor Stream Server")
     parser.add_argument("--host", type=str, default="localhost")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
-    
+
     pipeline = InferencePipeline()
-    
+
     server = TensorStreamServer(args.host, args.port)
     server.set_pipeline(pipeline)
-    
+
     try:
         await server.start()
     except KeyboardInterrupt:

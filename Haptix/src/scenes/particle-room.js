@@ -191,3 +191,6 @@ export function createParticleRoom(THREE) {
         isInteractive: true
     };
 }
+
+export const metadata = { name: "Particle Room", category: "Interactive", description: "Interactive particle physics room", interactive: true };
+export default (THREE) => createParticleRoom(THREE);

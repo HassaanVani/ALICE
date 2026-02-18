@@ -206,3 +206,6 @@ export function createGlassBrainScene(THREE, tensorBridge = null) {
         getCurrentLayer: () => layerConfigs[Math.round(currentLayerIndex)]?.name
     };
 }
+
+export const metadata = { name: "Glass Brain", category: "Neural", description: "Real-time neural activation viewer", interactive: false };
+export default (THREE, tensorBridge) => createGlassBrainScene(THREE, tensorBridge);

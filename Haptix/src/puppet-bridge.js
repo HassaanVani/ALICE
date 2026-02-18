@@ -16,8 +16,15 @@ export class PuppetBridge {
             onConnect: null,
             onDisconnect: null,
             onArmUpdate: null,
-            onError: null
+            onError: null,
+            onStateSync: null,
+            onHeartbeat: null
         };
+        this.lastState = null;
+        this.lastHeartbeat = null;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this._autoReconnect = true;
 
         this.PINCH_THRESHOLD = 0.08;
         this.FIST_THRESHOLD = 0.15;
@@ -36,6 +43,7 @@ export class PuppetBridge {
                 this.connected = false;
                 this.stopStreaming();
                 this.callbacks.onDisconnect?.();
+                this._attemptReconnect();
             };
 
             this.socket.onerror = (error) => {
@@ -51,6 +59,7 @@ export class PuppetBridge {
     }
 
     disconnect() {
+        this._autoReconnect = false;
         this.stopStreaming();
         if (this.socket) {
             this.socket.close();
@@ -59,11 +68,29 @@ export class PuppetBridge {
         this.connected = false;
     }
 
+    _attemptReconnect() {
+        if (!this._autoReconnect) return;
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            setTimeout(() => {
+                if (!this.connected && this._autoReconnect) {
+                    this.connect();
+                }
+            }, 2000 * this.reconnectAttempts);
+        }
+    }
+
     _handleMessage(data) {
         try {
             const msg = JSON.parse(data);
             if (msg.type === 'arm_position') {
                 this.callbacks.onArmUpdate?.(msg);
+            } else if (msg.type === 'state_sync') {
+                this.lastState = msg.state;
+                this.callbacks.onStateSync?.(msg.state);
+            } else if (msg.type === 'heartbeat') {
+                this.lastHeartbeat = msg.timestamp;
+                this.callbacks.onHeartbeat?.(msg.timestamp);
             }
         } catch (e) { }
     }
@@ -207,6 +234,16 @@ export class PuppetBridge {
 
     onError(callback) {
         this.callbacks.onError = callback;
+        return this;
+    }
+
+    onStateSync(callback) {
+        this.callbacks.onStateSync = callback;
+        return this;
+    }
+
+    onHeartbeat(callback) {
+        this.callbacks.onHeartbeat = callback;
         return this;
     }
 }

@@ -14,15 +14,19 @@ class BlockData:
     corners: np.ndarray
     rotation: float
     confidence: float
-    
+    track_id: Optional[int] = None
+
     def as_dict(self) -> dict:
-        return {
+        d = {
             "block_id": self.block_id,
             "marker_id": self.marker_id,
             "center": (self.center_x, self.center_y),
             "rotation": self.rotation,
             "confidence": self.confidence
         }
+        if self.track_id is not None:
+            d["track_id"] = self.track_id
+        return d
 
 
 class ArucoDetector:

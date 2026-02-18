@@ -131,3 +131,6 @@ export function createGalaxyScene(THREE) {
         maxDistance: 150
     };
 }
+
+export const metadata = { name: "Galaxy", category: "Space", description: "Spiral galaxy simulation", interactive: false };
+export default (THREE) => createGalaxyScene(THREE);

@@ -7,8 +7,12 @@ export class TensorBridge {
             onActivation: null,
             onConnect: null,
             onDisconnect: null,
-            onError: null
+            onError: null,
+            onStateSync: null,
+            onHeartbeat: null
         };
+        this.lastState = null;
+        this.lastHeartbeat = null;
         this.layerData = new Map();
         this.frozen = false;
         this.reconnectAttempts = 0;
@@ -68,6 +72,12 @@ export class TensorBridge {
                 const json = JSON.parse(data);
                 if (json.type === 'activation') {
                     this._processJsonActivation(json);
+                } else if (json.type === 'state_sync') {
+                    this.lastState = json.state;
+                    this.callbacks.onStateSync?.(json.state);
+                } else if (json.type === 'heartbeat') {
+                    this.lastHeartbeat = json.timestamp;
+                    this.callbacks.onHeartbeat?.(json.timestamp);
                 }
             } catch (e) { }
         }
@@ -154,5 +164,15 @@ export class TensorBridge {
 
     getLayerNames() {
         return Array.from(this.layerData.keys());
+    }
+
+    onStateSync(callback) {
+        this.callbacks.onStateSync = callback;
+        return this;
+    }
+
+    onHeartbeat(callback) {
+        this.callbacks.onHeartbeat = callback;
+        return this;
     }
 }

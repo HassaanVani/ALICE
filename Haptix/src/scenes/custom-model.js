@@ -66,3 +66,6 @@ export function createCustomModelScene(THREE, modelUrl) {
         maxDistance: 50
     };
 }
+
+export const metadata = { name: "Custom Model", category: "Custom", description: "Upload your own 3D model", interactive: false };
+export default (THREE, url) => createCustomModelScene(THREE, url);

@@ -187,3 +187,6 @@ export function createGoldAtomScene(THREE) {
         maxDistance: 40
     };
 }
+
+export const metadata = { name: "Gold Atom", category: "Science", description: "Atomic structure of gold", interactive: false };
+export default (THREE) => createGoldAtomScene(THREE);

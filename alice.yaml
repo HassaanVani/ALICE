@@ -1,0 +1,48 @@
+# A.L.I.C.E. Configuration
+# Adaptive Learning Interface for Cognitive Exploration
+
+mode: tetris
+simulate: true
+
+hardware:
+  arm:
+    port: null           # auto-detect if null
+    baudrate: 115200
+  magnet:
+    port: null
+    pin: 13
+  imu:
+    port: null
+
+cameras:
+  overhead:
+    device_id: 0
+    width: 1920
+    height: 1080
+    fps: 60
+  front:
+    device_id: 1
+    width: 1280
+    height: 720
+    fps: 30
+
+websocket:
+  tensor_host: localhost
+  tensor_port: 8765
+  puppet_host: localhost
+  puppet_port: 8766
+  audience_port: 8767
+
+narration:
+  enabled: false
+  voice_rate: 175
+  min_interval: 8
+  model: gemini-pro
+
+selftest:
+  enabled: true
+  halt_on_failure: false
+
+recording:
+  enabled: false
+  output_dir: recordings

@@ -133,3 +133,6 @@ export function createDNAScene(THREE) {
         maxDistance: 50
     };
 }
+
+export const metadata = { name: "DNA", category: "Science", description: "DNA double helix", interactive: false };
+export default (THREE) => createDNAScene(THREE);

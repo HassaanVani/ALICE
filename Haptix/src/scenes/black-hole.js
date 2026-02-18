@@ -116,3 +116,6 @@ export function createBlackHoleScene(THREE) {
         maxDistance: 100
     };
 }
+
+export const metadata = { name: "Black Hole", category: "Space", description: "Black hole gravitational lensing", interactive: false };
+export default (THREE) => createBlackHoleScene(THREE);

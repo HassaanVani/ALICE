@@ -151,16 +151,61 @@ class ChimpSortFSM:
         zx, zy, zw, zh = self._sorted_zone
         return zx <= x < zx + zw and zy <= y < zy + zh
     
-    def get_next_robot_target(self) -> Optional[Tuple[int, Tuple[int, int]]]:
+    def get_state_vector(self) -> "np.ndarray":
+        """Return normalized state vector for RL agent (64-dim)."""
+        import numpy as _np
+        obs = _np.zeros(64, dtype=_np.float32)
+        sorted_zone = self._sorted_zone
+        for block_id, pos in self._block_positions.items():
+            if 1 <= block_id <= 16:
+                idx = block_id - 1
+                base = idx * 4
+                obs[base] = pos[0] / 800.0
+                obs[base + 1] = pos[1] / 300.0
+                obs[base + 2] = 1.0 if self.is_in_sorted_zone(pos[0], pos[1]) else 0.0
+                placed_before = sum(
+                    1 for bid in range(1, block_id)
+                    if bid in self._block_positions and
+                    self.is_in_sorted_zone(*self._block_positions[bid])
+                )
+                obs[base + 3] = placed_before / max(1, idx) if idx > 0 else 1.0
+        return obs
+
+    def apply_action(self, block_id: int) -> Optional[Tuple[int, Tuple[int, int]]]:
+        """Apply an RL action: move block_id to its sorted position."""
+        if block_id not in self._block_positions:
+            return None
+        target_x = self._sorted_zone[0] + (block_id - 1) * 50
+        target_y = self._sorted_zone[1] + 50
+        return (block_id, (target_x, target_y))
+
+    def get_next_robot_target(self, rl_agent=None, audience_vote: Optional[int] = None) -> Optional[Tuple[int, Tuple[int, int]]]:
         if self._state != SortState.CYBORG_COOP:
             return None
-        
+
+        # Audience vote takes priority
+        if audience_vote is not None and audience_vote in self._block_positions:
+            return self.apply_action(audience_vote)
+
+        # RL agent next
+        if rl_agent is not None:
+            try:
+                obs = self.get_state_vector()
+                action, _ = rl_agent.predict(obs, deterministic=True)
+                block_id = int(action) + 1
+                result = self.apply_action(block_id)
+                if result:
+                    return result
+            except Exception:
+                pass
+
+        # Greedy fallback
         for block_id, pos in self._block_positions.items():
             if self.is_in_drop_zone(pos[0], pos[1]):
                 target_x = self._sorted_zone[0] + (block_id - 1) * 50
                 target_y = self._sorted_zone[1] + 50
                 return (block_id, (target_x, target_y))
-        
+
         return None
     
     def get_ghost_replay_moves(self) -> List[MoveRecord]:

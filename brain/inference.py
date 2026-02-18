@@ -13,6 +13,7 @@ except ImportError:
 
 from .cnn_model import BlockRecognizerCNN
 from .hooks import HookManager
+from .state_model import BlockStateClassifier, BlockState
 
 
 class InferencePipeline:
@@ -116,6 +117,24 @@ class InferencePipeline:
     def get_websocket_payload(self, layer_name: Optional[str] = None) -> bytes:
         return self.hooks.serialize_for_websocket(layer_name)
     
+    def predict_state(self, image: np.ndarray) -> Tuple[BlockState, float]:
+        """Predict block state (upright/tilted/stacked/occluded)."""
+        if not hasattr(self, '_state_model') or self._state_model is None:
+            self._state_model = BlockStateClassifier().to(self._device)
+        tensor = self.preprocess(image)
+        return self._state_model.predict(tensor)
+
+    def load_state_weights(self, path: Path) -> bool:
+        try:
+            if not hasattr(self, '_state_model') or self._state_model is None:
+                self._state_model = BlockStateClassifier()
+            self._state_model.load(path)
+            self._state_model.to(self._device)
+            return True
+        except Exception as e:
+            print(f"[InferencePipeline] Failed to load state weights: {e}")
+            return False
+
     def load_weights(self, path: Path) -> bool:
         try:
             self.model.load(path)
