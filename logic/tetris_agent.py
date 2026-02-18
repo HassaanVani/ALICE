@@ -231,16 +231,85 @@ class TetrisAgent:
         return actions
     
     def step(self) -> TetrisAction:
+        """Compute best placement, apply it to the board, and spawn next piece."""
+        if not self._state or self._state.game_over:
+            return TetrisAction.NONE
+
         actions = self.compute_best_move()
-        
-        if actions:
-            action = actions[0]
+
+        if not actions:
+            # No valid placement — game over
+            self._state.game_over = True
+            return TetrisAction.NONE
+
+        # Find the best placement (last action is HARD_DROP)
+        # Replay the actions to determine final rotation and x
+        piece = PIECES[self._state.current_piece]
+        rotation = 0
+        target_x = self._state.piece_x
+
+        for action in actions:
+            if action == TetrisAction.ROTATE_CW:
+                rotation = (rotation + 1) % 4
+            elif action == TetrisAction.LEFT:
+                target_x -= 1
+            elif action == TetrisAction.RIGHT:
+                target_x += 1
+
+        rotated = np.rot90(piece, rotation)
+        h, w = rotated.shape
+        landing_y = self._simulate_drop(rotated, target_x)
+
+        if landing_y < 0:
+            self._state.game_over = True
+            return TetrisAction.NONE
+
+        # Place the piece on the board
+        for dy in range(h):
+            for dx in range(w):
+                if rotated[dy, dx]:
+                    by, bx = landing_y + dy, target_x + dx
+                    if 0 <= by < self.BOARD_HEIGHT and 0 <= bx < self.BOARD_WIDTH:
+                        self._state.board[by, bx] = 1
+
+        # Clear completed lines
+        lines = self._count_complete_lines(self._state.board)
+        if lines > 0:
+            self._state.board = self._clear_lines(self._state.board)
+            self._state.lines_cleared += lines
+            # Scoring: 100, 300, 500, 800 for 1-4 lines
+            line_scores = {1: 100, 2: 300, 3: 500, 4: 800}
+            self._state.score += line_scores.get(lines, lines * 200) * self._state.level
+            self._state.level = 1 + self._state.lines_cleared // 10
+
+        # Spawn next piece
+        self._state.current_piece = self._state.next_pieces.pop(0)
+        self._state.next_pieces.append(random.randint(0, 6))
+        self._state.piece_x = self.BOARD_WIDTH // 2 - 1
+        self._state.piece_y = 0
+        self._state.piece_rotation = 0
+
+        # Check if new piece collides immediately (game over)
+        new_piece = PIECES[self._state.current_piece]
+        if self._collision(new_piece, self._state.piece_x, 0):
+            self._state.game_over = True
+
+        # Fire callbacks
+        for action in actions:
             if self._on_action:
                 self._on_action(action)
-            return action
-        
-        return TetrisAction.NONE
+
+        if self._on_state_update:
+            self._on_state_update(self._state)
+
+        return TetrisAction.HARD_DROP
     
+    def get_board_list(self) -> list:
+        """Return the board as a list of lists for JSON serialization."""
+        if not self._state:
+            return []
+        return self._state.board.tolist()
+
     def run_async(self) -> None:
         import threading
         

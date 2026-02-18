@@ -1,11 +1,11 @@
 import React from 'react';
 
 const MODES = [
-  { id: 'IDLE', label: 'Idle', color: '#52525b', description: 'Standby mode' },
-  { id: 'SORT', label: 'Sort', color: '#3b82f6', description: 'Color sorting' },
-  { id: 'TETRIS', label: 'Tetris', color: '#a855f7', description: 'Tetris packing' },
-  { id: 'AUDIENCE', label: 'Audience', color: '#22c55e', description: 'Audience control' },
-  { id: 'CALIBRATE', label: 'Calibrate', color: '#eab308', description: 'Arm calibration' },
+  { id: 'idle', label: 'Idle', color: '#52525b', description: 'Standby mode' },
+  { id: 'chimp', label: 'Sort', color: '#3b82f6', description: 'ChimpSort challenge' },
+  { id: 'tetris', label: 'Tetris', color: '#a855f7', description: 'Tetris packing' },
+  { id: 'puppeteer', label: 'Puppet', color: '#22c55e', description: 'Arm teleoperation' },
+  { id: 'calibrate', label: 'Calibrate', color: '#eab308', description: 'Arm calibration' },
 ];
 
 const styles = {

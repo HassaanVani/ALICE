@@ -3,16 +3,24 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 const WS_URL = `ws://${window.location.hostname || 'localhost'}:8765`;
 
 const DEFAULT_STATE = {
-  mode: 'IDLE',
-  blocks: [],
-  joints: [0, 0, 0, 0, 0, 0],
-  gripperOpen: true,
-  sortProgress: 0,
-  tetrisProgress: 0,
-  cameraHealth: 'unknown',
-  recording: false,
-  fps: 0,
-  uptime: 0,
+  mode: 'idle',
+  arm_position: [90, 90, 90, 90, 90],
+  arm_state: 'idle',
+  gripper_position: 0,
+  cameras: { overhead: 'unknown', front: 'unknown' },
+  sort_state: 'idle',
+  sort_move_count: 0,
+  tetris_score: 0,
+  tetris_lines: 0,
+  tetris_level: 1,
+  tetris_game_over: false,
+  tetris_board: [],
+  puppeteer_state: 'idle',
+  puppeteer_recording: false,
+  calibration_points: 0,
+  calibration_ready: false,
+  detected_blocks: [],
+  timestamp: 0,
   lastHeartbeat: null,
 };
 
@@ -31,7 +39,6 @@ export function useAliceState() {
 
       ws.onopen = () => {
         setConnected(true);
-        console.log('[useAliceState] Connected to', WS_URL);
         if (reconnectTimer.current) {
           clearTimeout(reconnectTimer.current);
           reconnectTimer.current = null;
@@ -45,28 +52,18 @@ export function useAliceState() {
 
           const msg = JSON.parse(event.data);
 
-          if (msg.type === 'state_sync') {
-            setState((prev) => ({
-              ...prev,
-              mode: msg.mode ?? prev.mode,
-              blocks: msg.blocks ?? prev.blocks,
-              joints: msg.joints ?? prev.joints,
-              gripperOpen: msg.gripper_open ?? prev.gripperOpen,
-              sortProgress: msg.sort_progress ?? prev.sortProgress,
-              tetrisProgress: msg.tetris_progress ?? prev.tetrisProgress,
-              cameraHealth: msg.camera_health ?? prev.cameraHealth,
-              recording: msg.recording ?? prev.recording,
-              fps: msg.fps ?? prev.fps,
-              uptime: msg.uptime ?? prev.uptime,
-            }));
+          if (msg.type === 'state_sync' && msg.state) {
+            // Server sends { type: "state_sync", state: { mode, arm_position, ... } }
+            setState((prev) => ({ ...prev, ...msg.state }));
           } else if (msg.type === 'heartbeat') {
             setState((prev) => ({
               ...prev,
               lastHeartbeat: Date.now(),
-              uptime: msg.uptime ?? prev.uptime,
             }));
+          } else if (msg.type === 'mode_switched') {
+            setState((prev) => ({ ...prev, mode: msg.mode }));
           }
-        } catch (err) {
+        } catch {
           // Ignore parse errors for non-JSON messages
         }
       };
@@ -74,16 +71,11 @@ export function useAliceState() {
       ws.onclose = () => {
         setConnected(false);
         wsRef.current = null;
-        console.log('[useAliceState] Disconnected, reconnecting in 2s...');
         reconnectTimer.current = setTimeout(connect, 2000);
       };
 
-      ws.onerror = (err) => {
-        console.warn('[useAliceState] WebSocket error:', err);
-        ws.close();
-      };
-    } catch (err) {
-      console.warn('[useAliceState] Connection failed:', err);
+      ws.onerror = () => ws.close();
+    } catch {
       reconnectTimer.current = setTimeout(connect, 2000);
     }
   }, []);
@@ -96,11 +88,10 @@ export function useAliceState() {
     };
   }, [connect]);
 
+  // Server expects { command: "...", ...params }
   const sendCommand = useCallback((command, payload = {}) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: command, ...payload }));
-    } else {
-      console.warn('[useAliceState] Cannot send, not connected');
+      wsRef.current.send(JSON.stringify({ command, ...payload }));
     }
   }, []);
 

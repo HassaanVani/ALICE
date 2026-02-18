@@ -20,8 +20,17 @@ class AliceState:
         "front": "unknown"
     })
     sort_state: str = "idle"
+    sort_move_count: int = 0
+    sort_start_time: float = 0.0
     tetris_score: int = 0
+    tetris_lines: int = 0
+    tetris_level: int = 1
+    tetris_game_over: bool = False
+    tetris_board: List[List[int]] = field(default_factory=list)
     puppeteer_state: str = "idle"
+    puppeteer_recording: bool = False
+    calibration_points: int = 0
+    calibration_ready: bool = False
     detected_blocks: List[Dict] = field(default_factory=list)
     timestamp: float = 0.0
 
@@ -33,8 +42,17 @@ class AliceState:
             "gripper_position": self.gripper_position,
             "cameras": self.cameras,
             "sort_state": self.sort_state,
+            "sort_move_count": self.sort_move_count,
+            "sort_start_time": self.sort_start_time,
             "tetris_score": self.tetris_score,
+            "tetris_lines": self.tetris_lines,
+            "tetris_level": self.tetris_level,
+            "tetris_game_over": self.tetris_game_over,
+            "tetris_board": self.tetris_board,
             "puppeteer_state": self.puppeteer_state,
+            "puppeteer_recording": self.puppeteer_recording,
+            "calibration_points": self.calibration_points,
+            "calibration_ready": self.calibration_ready,
             "detected_blocks": self.detected_blocks,
             "timestamp": self.timestamp,
         }
@@ -92,6 +110,29 @@ class AliceStateManager:
 
     def update_puppeteer_state(self, state: str) -> None:
         self._state.puppeteer_state = state
+        self._notify()
+
+    def update_tetris_state(self, lines_cleared: int = 0, level: int = 1,
+                             game_over: bool = False, board: list = None) -> None:
+        self._state.tetris_lines = lines_cleared
+        self._state.tetris_level = level
+        self._state.tetris_game_over = game_over
+        if board is not None:
+            self._state.tetris_board = board
+        self._notify()
+
+    def update_sort_progress(self, move_count: int = 0, start_time: float = 0.0) -> None:
+        self._state.sort_move_count = move_count
+        self._state.sort_start_time = start_time
+        self._notify()
+
+    def update_puppeteer_recording(self, recording: bool) -> None:
+        self._state.puppeteer_recording = recording
+        self._notify()
+
+    def update_calibration(self, points: int = 0, ready: bool = False) -> None:
+        self._state.calibration_points = points
+        self._state.calibration_ready = ready
         self._notify()
 
     def update_blocks(self, blocks: List[Dict]) -> None:

@@ -5,10 +5,10 @@ const WS_URL = `ws://${window.location.hostname || 'localhost'}:8765`;
 /**
  * Decodes binary activation data from the ALICE backend.
  *
- * Binary protocol:
- *   [1 byte: num_layers]
+ * Binary protocol (matches server.py and Haptix TensorBridge):
+ *   [4 bytes: num_layers (uint32 LE)]
  *   For each layer:
- *     [1 byte: name_length]
+ *     [4 bytes: name_length (uint32 LE)]
  *     [N bytes: layer_name (UTF-8)]
  *     [4 bytes: num_values (uint32 LE)]
  *     [num_values * 4 bytes: float32 LE values]
@@ -19,12 +19,14 @@ function decodeBinaryActivations(buffer) {
   let offset = 0;
 
   try {
-    const numLayers = view.getUint8(offset);
-    offset += 1;
+    if (buffer.byteLength < 4) return layers;
+
+    const numLayers = view.getUint32(offset, true);
+    offset += 4;
 
     for (let i = 0; i < numLayers; i++) {
-      const nameLen = view.getUint8(offset);
-      offset += 1;
+      const nameLen = view.getUint32(offset, true);
+      offset += 4;
 
       const nameBytes = new Uint8Array(buffer, offset, nameLen);
       const name = new TextDecoder().decode(nameBytes);
@@ -63,8 +65,7 @@ export function useTensorStream() {
 
       ws.onopen = () => {
         console.log('[useTensorStream] Connected');
-        // Request tensor stream subscription
-        ws.send(JSON.stringify({ type: 'subscribe_tensors' }));
+        // Server auto-broadcasts tensors to all clients — no subscription needed
       };
 
       ws.onmessage = (event) => {

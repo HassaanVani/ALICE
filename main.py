@@ -17,6 +17,7 @@ from vision import (CameraManager, CameraConfig, CameraRole, CameraHealth,
 from brain import InferencePipeline
 from logic import ChimpSortFSM, SortState, TetrisAgent
 from server import TensorStreamServer
+from puppet_server import PuppetServer
 from audience_server import AudienceServer
 from narration import NarrationService
 
@@ -67,6 +68,14 @@ class ALICE:
 
         # Recording
         self.recorder = SessionRecorder(config.recording.output_dir)
+
+        # Puppet server
+        self.puppet_server = PuppetServer(
+            host=config.websocket.puppet_host if hasattr(config.websocket, 'puppet_host') else "localhost",
+            port=config.websocket.puppet_port,
+            simulate=config.simulate,
+        )
+        self.puppet_server.set_state_manager(self.state_manager)
 
         # Audience
         self.audience_server = AudienceServer(
@@ -140,6 +149,7 @@ class ALICE:
             self._ws_server.set_camera_frame_getter(
                 lambda: self.cameras.get_frame(CameraRole.OVERHEAD)
             )
+            self._ws_server.set_recorder(self.recorder)
 
             # Load RL agent if available
             self._load_rl_agent()
@@ -240,6 +250,7 @@ class ALICE:
         # Build async tasks
         tasks = [
             asyncio.create_task(self._ws_server.start()),
+            asyncio.create_task(self.puppet_server.start()),
             asyncio.create_task(self._mode_loop()),
             asyncio.create_task(self.audience_server.start()),
             asyncio.create_task(self.narration.start()),
@@ -281,9 +292,38 @@ class ALICE:
             await asyncio.sleep(0.1)
 
     async def _run_chimp_sort(self) -> None:
-        self.sort_fsm.start_human_benchmark()
         current_mode = self.mode
 
+        # ── Phase 1: Human Benchmark ──
+        logger.info("ChimpSort Phase 1: Human Benchmark — sort the blocks!")
+        self.sort_fsm.start_human_benchmark()
+        human_session = await self._sort_loop(current_mode)
+        if not self._running or self.mode != current_mode:
+            return
+
+        # ── Phase 2: Ghost Replay ──
+        if human_session and human_session.moves:
+            logger.info(f"ChimpSort Phase 2: Ghost Replay — replaying {len(human_session.moves)} moves")
+            self.sort_fsm.start_ghost_replay(human_session)
+            self.state_manager.update_sort_state("ghost_replay")
+            for move in human_session.moves:
+                if not self._running or self.mode != current_mode:
+                    return
+                angles = self.calibration.pixel_to_arm(move.to_pos[0], move.to_pos[1])
+                self.arm.move_to(angles)
+                self.gripper.close()
+                await asyncio.sleep(0.3)
+                self.gripper.open()
+                await asyncio.sleep(0.2)
+            logger.info("Ghost replay complete")
+
+        # ── Phase 3: Cyborg Cooperation ──
+        logger.info("ChimpSort Phase 3: Cyborg Cooperation — human + robot + audience!")
+        self.sort_fsm.start_cyborg_coop()
+        await self._sort_loop(current_mode)
+
+    async def _sort_loop(self, current_mode) -> Optional['SortingSession']:
+        """Shared detection/tracking/state loop for human benchmark and cyborg phases."""
         while self._running and self.mode == current_mode:
             frame = self.cameras.get_frame(CameraRole.OVERHEAD)
             if frame is None:
@@ -292,7 +332,7 @@ class ALICE:
 
             blocks = self.detector.detect_blocks(frame)
 
-            # Update tracker (F2)
+            # Update tracker
             tracked = self.tracker.update(blocks)
             for t in tracked:
                 for b in blocks:
@@ -309,18 +349,22 @@ class ALICE:
             # Update state
             self.state_manager.update_blocks([b.as_dict() for b in blocks])
             self.state_manager.update_arm(self.arm.position.as_tuple(), self.arm.state.value)
+            if self.sort_fsm.session:
+                self.state_manager.update_sort_progress(
+                    move_count=self.sort_fsm.session.move_count,
+                    start_time=self.sort_fsm.session.start_time,
+                )
 
             if self.sort_fsm.state == SortState.COMPLETE:
                 logger.info(f"Sorting complete! Duration: {self.sort_fsm.session.duration:.2f}s")
-                break
+                return self.sort_fsm.session
 
             if self.sort_fsm.state == SortState.CYBORG_COOP:
-                # Consume audience block votes (returns winner + clears for next round)
+                # Consume audience block votes
                 audience_vote = None
                 winner_info = self.audience_server.consume_votes()
                 if winner_info:
                     audience_vote = winner_info["block_id"]
-                    # Tell every phone who won
                     await self.audience_server.broadcast_winner(winner_info)
 
                 target = self.sort_fsm.get_next_robot_target(
@@ -329,7 +373,6 @@ class ALICE:
                 )
                 if target:
                     block_id, (tx, ty) = target
-                    # Tell audience what the robot is doing
                     await self.audience_server.broadcast_action("pick", {
                         "block_id": block_id, "target_x": tx, "target_y": ty,
                     })
@@ -340,6 +383,7 @@ class ALICE:
                     self.gripper.open()
 
             await asyncio.sleep(0.016)
+        return self.sort_fsm.session
 
     async def _run_tetris(self) -> None:
         self.tetris.reset()
@@ -359,6 +403,12 @@ class ALICE:
 
             if self.tetris.state:
                 self.state_manager.update_tetris_score(self.tetris.state.score)
+                self.state_manager.update_tetris_state(
+                    lines_cleared=self.tetris.state.lines_cleared,
+                    level=self.tetris.state.level,
+                    game_over=self.tetris.state.game_over,
+                    board=self.tetris.get_board_list(),
+                )
 
             await asyncio.sleep(0.1)
 
@@ -484,6 +534,7 @@ class ALICE:
 
         await self.narration.stop()
         await self._ws_server.stop()
+        await self.puppet_server.stop()
         await self.audience_server.stop()
 
         if self.cameras:

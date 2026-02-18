@@ -49,6 +49,14 @@ class CameraFeed:
         self._last_frame_time: float = 0.0
         self._consecutive_failures: int = 0
         self._reconnect_attempts: int = 0
+        self._on_frame_callbacks: List[Callable[[np.ndarray], None]] = []
+        self._on_error_callbacks: List[Callable[['CameraFeed', CameraHealth], None]] = []
+
+    def on_frame(self, callback: Callable[[np.ndarray], None]) -> None:
+        self._on_frame_callbacks.append(callback)
+
+    def on_error(self, callback: Callable[['CameraFeed', CameraHealth], None]) -> None:
+        self._on_error_callbacks.append(callback)
 
     @property
     def health(self) -> CameraHealth:
@@ -118,18 +126,37 @@ class CameraFeed:
                 if self._health != CameraHealth.HEALTHY:
                     self._health = CameraHealth.HEALTHY
                     logger.info(f"Camera {self.config.role.value} recovered")
+                # Fire frame callbacks
+                for cb in self._on_frame_callbacks:
+                    try:
+                        cb(frame)
+                    except Exception as e:
+                        logger.debug(f"Frame callback error: {e}")
             else:
                 self._consecutive_failures += 1
                 if self._consecutive_failures > self.MAX_CONSECUTIVE_FAILURES:
+                    old_health = self._health
                     self._health = CameraHealth.DEGRADED
                     logger.warning(
                         f"Camera {self.config.role.value} degraded "
                         f"({self._consecutive_failures} consecutive failures)"
                     )
+                    # Fire error callbacks on health change
+                    if old_health != self._health:
+                        for cb in self._on_error_callbacks:
+                            try:
+                                cb(self, self._health)
+                            except Exception:
+                                pass
                     if self._attempt_reconnect():
                         self._consecutive_failures = 0
                     else:
                         self._health = CameraHealth.FAILED
+                        for cb in self._on_error_callbacks:
+                            try:
+                                cb(self, self._health)
+                            except Exception:
+                                pass
                         logger.error(f"Camera {self.config.role.value} failed after reconnect attempts")
                         break
                 time.sleep(0.001)
@@ -207,11 +234,19 @@ class CameraManager:
     def on_frame(self, role: CameraRole, callback: Callable[[np.ndarray], None]) -> None:
         if role in self._callbacks:
             self._callbacks[role].append(callback)
+        # Wire directly to the feed so it fires from the capture thread
+        feed = self._feeds.get(role)
+        if feed:
+            feed.on_frame(callback)
 
     def on_error(self, role: CameraRole, callback: Callable[[CameraRole, CameraHealth], None]) -> None:
         if role not in self._error_callbacks:
             self._error_callbacks[role] = []
         self._error_callbacks[role].append(callback)
+        # Wire to feed — adapt signature (feed passes CameraFeed, CameraHealth)
+        feed = self._feeds.get(role)
+        if feed:
+            feed.on_error(lambda _feed, health: callback(role, health))
 
     def start_all(self) -> None:
         for feed in self._feeds.values():

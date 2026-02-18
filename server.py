@@ -32,6 +32,7 @@ class TensorStreamServer:
         self._switch_mode_callback: Optional[Callable[[str], None]] = None
         self._camera_stream_clients: Set[WebSocketServerProtocol] = set()
         self._camera_frame_getter: Optional[Callable] = None
+        self._recorder = None
 
     def set_pipeline(self, pipeline: InferencePipeline) -> None:
         self.pipeline = pipeline
@@ -44,6 +45,10 @@ class TensorStreamServer:
 
     def set_camera_frame_getter(self, getter: Callable) -> None:
         self._camera_frame_getter = getter
+
+    def set_recorder(self, recorder) -> None:
+        """Set reference to SessionRecorder for recording commands."""
+        self._recorder = recorder
 
     async def register(self, websocket: WebSocketServerProtocol) -> None:
         self.clients.add(websocket)
@@ -124,6 +129,29 @@ class TensorStreamServer:
             elif command == "get_state":
                 if self._state_manager:
                     await websocket.send(self._state_manager.get_state_sync_message())
+
+            elif command == "start_recording":
+                if self._recorder and not self._recorder.is_recording:
+                    self._recorder.start()
+                    await websocket.send(json.dumps({"type": "recording_started"}))
+                    logger.info("Recording started via dashboard")
+
+            elif command == "stop_recording":
+                if self._recorder and self._recorder.is_recording:
+                    path = self._recorder.stop()
+                    await websocket.send(json.dumps({
+                        "type": "recording_stopped",
+                        "path": str(path) if path else None,
+                    }))
+                    logger.info("Recording stopped via dashboard")
+
+            elif command == "snapshot":
+                if self._state_manager:
+                    snapshot = self._state_manager.get_snapshot()
+                    await websocket.send(json.dumps({
+                        "type": "snapshot",
+                        "state": snapshot,
+                    }))
 
         except json.JSONDecodeError:
             pass

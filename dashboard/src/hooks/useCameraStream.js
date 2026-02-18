@@ -19,8 +19,8 @@ export function useCameraStream() {
       ws.onopen = () => {
         setCameraConnected(true);
         console.log('[useCameraStream] Connected');
-        // Subscribe to camera frames
-        ws.send(JSON.stringify({ type: 'subscribe_camera' }));
+        // Request camera stream from server (server expects "command" field)
+        ws.send(JSON.stringify({ command: 'stream_camera' }));
       };
 
       ws.onmessage = (event) => {
@@ -34,12 +34,12 @@ export function useCameraStream() {
           // Handle JSON messages (e.g., camera frame as base64)
           try {
             const msg = JSON.parse(event.data);
-            if (msg.type === 'camera_frame' && msg.data) {
+            if (msg.type === 'camera_frame' && (msg.jpeg_b64 || msg.data)) {
               if (frameRef.current) {
                 URL.revokeObjectURL(frameRef.current);
               }
               // Convert base64 JPEG to blob URL
-              const binary = atob(msg.data);
+              const binary = atob(msg.jpeg_b64 || msg.data);
               const array = new Uint8Array(binary.length);
               for (let i = 0; i < binary.length; i++) {
                 array[i] = binary.charCodeAt(i);
