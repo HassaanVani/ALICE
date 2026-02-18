@@ -65,6 +65,34 @@ Event: Mode switch from {from_mode} to {to_mode}
 Announce the mode transition briefly."""
 
 
+def rebellion_prompt(blocks_remaining: int, crowd_choice: int,
+                     robot_choice: int, move_count: int) -> str:
+    override_text = (f"The audience voted for block {crowd_choice}. ALICE chose block {robot_choice}."
+                     if crowd_choice and crowd_choice != robot_choice
+                     else "The audience hasn't voted yet." if not crowd_choice
+                     else f"The audience and ALICE both chose block {robot_choice}.")
+    return f"""{SYSTEM_PROMPT}
+
+Current mode: Rebellion (autonomous override)
+Context: We deliberately gave ALICE permission to ignore audience votes and sort optimally.
+This demonstrates what happens when we remove human oversight from an AI system.
+Blocks remaining: {blocks_remaining}
+Moves so far: {move_count}
+{override_text}
+
+Provide a brief narration. Emphasize that ALICE is doing what we told it to — we gave it this freedom."""
+
+
+def awaiting_puppeteer_prompt() -> str:
+    return f"""{SYSTEM_PROMPT}
+
+Event: Waiting for a volunteer to try puppeteer mode.
+A volunteer will control the robotic arm with their bare hand through a webcam.
+Their body's kinematics become the robot's kinematics in real-time.
+
+Invite someone to step up and try it. Keep it brief and exciting."""
+
+
 def error_prompt(error_type: str, detail: str) -> str:
     return f"""{SYSTEM_PROMPT}
 

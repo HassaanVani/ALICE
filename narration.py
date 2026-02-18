@@ -101,7 +101,8 @@ class NarrationService:
         import time
         from narration_prompts import (
             chimp_sort_prompt, tetris_prompt, puppeteer_prompt,
-            calibration_prompt, mode_switch_prompt
+            calibration_prompt, mode_switch_prompt, rebellion_prompt,
+            awaiting_puppeteer_prompt
         )
 
         # Check for mode switch
@@ -113,6 +114,16 @@ class NarrationService:
         self._last_mode = state.mode
 
         if state.mode == "chimp":
+            if state.sort_state == "rebellion":
+                return rebellion_prompt(
+                    blocks_remaining=16 - len([b for b in state.detected_blocks
+                                               if b.get("in_sorted_zone", False)]),
+                    crowd_choice=state.rebellion_crowd_choice,
+                    robot_choice=state.rebellion_robot_choice,
+                    move_count=state.sort_move_count,
+                )
+            if state.sort_state == "awaiting_puppeteer":
+                return awaiting_puppeteer_prompt()
             elapsed = time.time() - state.sort_start_time if state.sort_start_time else 0.0
             return chimp_sort_prompt(
                 sort_state=state.sort_state,
@@ -169,8 +180,17 @@ class NarrationService:
                 return f"Human sorting in progress. {state.sort_move_count} moves in {elapsed:.0f} seconds."
             elif state.sort_state == "ghost_replay":
                 return "Now replaying the human's sorting strategy."
+            elif state.sort_state == "awaiting_puppeteer":
+                return "Waiting for a volunteer to control the arm. Step up and move your hand."
             elif state.sort_state == "cyborg_coop":
                 return f"Cyborg cooperation active. {state.sort_move_count} moves so far."
+            elif state.sort_state == "rebellion":
+                if state.rebellion_crowd_choice and state.rebellion_robot_choice:
+                    if state.rebellion_crowd_choice != state.rebellion_robot_choice:
+                        return (f"The audience voted block {state.rebellion_crowd_choice}. "
+                                f"ALICE chose block {state.rebellion_robot_choice}. "
+                                f"We gave her permission to decide.")
+                return f"ALICE is sorting autonomously. {state.sort_move_count} moves, ignoring all suggestions."
             elif state.sort_state == "complete":
                 return "Sorting complete. Well done, team."
         elif state.mode == "tetris":

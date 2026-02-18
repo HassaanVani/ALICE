@@ -19,14 +19,16 @@ logger = logging.getLogger("AudienceServer")
 
 # ─── Phase descriptions shown to audience ───────────────────────────
 PHASE_INFO = {
-    "idle":             {"label": "Waiting",       "desc": "Demo hasn't started yet", "interactive": False},
-    "human_benchmark":  {"label": "Human Turn",    "desc": "Watch the human sort",   "interactive": False},
-    "ghost_replay":     {"label": "Ghost Replay",  "desc": "Replaying the human",     "interactive": False},
-    "cyborg_coop":      {"label": "Your Turn",     "desc": "Tap a block to vote!",    "interactive": True},
-    "complete":         {"label": "Done!",          "desc": "Sorting complete",         "interactive": False},
-    "tetris":           {"label": "Tetris",         "desc": "Tilt to nudge pieces",    "interactive": True},
-    "calibrate":        {"label": "Calibrating",    "desc": "System calibration",       "interactive": False},
-    "puppeteer":        {"label": "Puppeteer",      "desc": "Watch the arm dance",      "interactive": False},
+    "idle":                {"label": "Waiting",       "desc": "Demo hasn't started yet",              "interactive": False},
+    "human_benchmark":     {"label": "Human Turn",    "desc": "Watch the human sort",                 "interactive": False},
+    "ghost_replay":        {"label": "Ghost Replay",  "desc": "Replaying the human",                  "interactive": False},
+    "awaiting_puppeteer":  {"label": "Puppeteer",     "desc": "A volunteer is becoming the robot",    "interactive": False},
+    "cyborg_coop":         {"label": "Your Turn",     "desc": "Tap a block to vote!",                 "interactive": True},
+    "rebellion":           {"label": "Override",       "desc": "ALICE has her own plan",               "interactive": True},
+    "complete":            {"label": "Done!",          "desc": "Sorting complete",                     "interactive": False},
+    "tetris":              {"label": "Tetris",         "desc": "Tilt to nudge pieces",                 "interactive": True},
+    "calibrate":           {"label": "Calibrating",    "desc": "System calibration",                   "interactive": False},
+    "puppeteer":           {"label": "Puppeteer",      "desc": "A volunteer controls the arm",         "interactive": False},
 }
 
 
@@ -288,6 +290,17 @@ class AudienceServer:
             "type": "robot_action",
             "action": action_type,
             **detail,
+        })
+
+    async def broadcast_override(self, crowd_choice: int, robot_choice: int,
+                                  crowd_votes: int, reason: str = "optimal") -> None:
+        """Rebellion mode: tell audience their vote was heard but overridden."""
+        await self._broadcast({
+            "type": "vote_override",
+            "crowd_choice": crowd_choice,
+            "robot_choice": robot_choice,
+            "crowd_votes": crowd_votes,
+            "reason": reason,
         })
 
     # ── Transport ────────────────────────────────────────────────────

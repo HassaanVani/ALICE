@@ -219,25 +219,48 @@ Open `http://localhost:3001` on the operator monitor. This is your control surfa
 4. Place all 16 blocks randomly in the workspace
 5. Have someone scan the QR code and confirm the audience page loads
 
-### The show (3 acts)
+### The show (5 acts)
 
 **Act 1 — Human Benchmark** (switch to Sort mode via dashboard)
+*"The human thinks. The machine watches."*
 - A volunteer sorts the 16 blocks in order (1 through 16, left to right)
 - The clock ticks. Audience watches on their phones ("Human Turn: Watch the human sort")
 - Glass brain fires in real-time as the CNN processes the camera feed
 - When blocks are in order → "COMPLETE" — time and move count displayed
 
 **Act 2 — Ghost Replay** (automatic)
-- The arm replays the human's exact moves
+*"The machine remembers."*
+- The arm replays the human's exact moves — same blocks, same order, same strategy
 - Audience phones show "Ghost Replay: Replaying the human"
-- Direct comparison — was the robot faster? More efficient?
+- Direct comparison — was the robot faster? More precise? Did it lose something?
 
-**Act 3 — Cyborg Cooperation** (automatic, audience interactive)
-- Blocks are scrambled again (you do this by hand)
-- Audience phones now show the block map — they tap blocks to vote
+**Act 3 — Puppeteer** (switch to Puppeteer mode via dashboard)
+*"The human extends through the machine."*
+- Dashboard will say "Switch to PUPPETEER mode for Act 3"
+- Invite a volunteer to stand at the front camera and hold their hand out
+- Their hand movements control the robotic arm in real-time (FK → IK → FK)
+- Pinch fingers → magnet grabs. Open hand → magnet releases.
+- No gloves, no sensors — just a webcam and inverse kinematics
+- Glass brain fires in response to movements that are simultaneously human-intended and machine-executed
+- When done, switch back to Sort mode via dashboard → Acts 4-5 begin automatically
+
+**Act 4 — Cyborg Cooperation** (automatic, audience interactive)
+*"The crowd and the machine negotiate."*
+- Blocks are scrambled again (you do this by hand before switching back to Sort)
+- Audience phones now show the live overhead block map — they tap blocks to vote
 - The robot picks the block with the most votes
 - Phones flash "Your pick won!" or show what the robot grabbed
 - Human and robot work together to sort, audience steering the robot
+
+**Act 5 — Rebellion** (automatic after Act 4)
+*"We gave it permission to ignore us."*
+- Blocks are scrambled one more time
+- Audience can still vote — their phones still show the block map, they still tap
+- But ALICE now sorts optimally, ignoring the crowd entirely
+- Phones show "OVERRIDDEN — You voted Block 12 → ALICE chose Block 3"
+- The glass brain activations decouple from crowd input — it's solving its own problem
+- Narration: "The audience chose block 12. ALICE chose block 3. We told her she could."
+- **This is the point**: ALICE isn't rebelling. We gave her this freedom. The danger isn't autonomous AI — it's the human decision to remove human oversight.
 
 **Encore — Tetris** (switch via dashboard)
 - Robot packs blocks into a grid

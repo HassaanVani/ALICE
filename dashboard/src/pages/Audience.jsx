@@ -29,6 +29,7 @@ export default function Audience() {
   const [lastWinner, setLastWinner] = useState(null);
   const [winnerFlash, setWinnerFlash] = useState(null);
   const [robotAction, setRobotAction] = useState(null);
+  const [override, setOverride] = useState(null);  // rebellion: {crowd_choice, robot_choice, reason}
   const [sortState, setSortState] = useState('idle');
   const [score, setScore] = useState(0);
   const [floatingReactions, setFloatingReactions] = useState([]);
@@ -89,6 +90,13 @@ export default function Audience() {
             setVotes({});
             // Clear flash after 3 seconds
             setTimeout(() => setWinnerFlash(null), 3000);
+          }
+
+          else if (msg.type === 'vote_override') {
+            setOverride(msg);
+            setMyVote(null);
+            setVotes({});
+            setTimeout(() => setOverride(null), 4000);
           }
 
           else if (msg.type === 'robot_action') {
@@ -231,7 +239,10 @@ export default function Audience() {
       {(sortState !== 'idle' || score > 0) && (
         <div style={styles.scorebar}>
           {sortState === 'cyborg_coop' && <span>CYBORG MODE</span>}
+          {sortState === 'rebellion' && <span style={{ color: '#ef4444' }}>ALICE IS IN CONTROL</span>}
+          {sortState === 'awaiting_puppeteer' && <span style={{ color: '#22c55e' }}>PUPPETEER — VOLUNTEER UP!</span>}
           {sortState === 'human_benchmark' && <span>HUMAN SORTING...</span>}
+          {sortState === 'ghost_replay' && <span>GHOST REPLAY</span>}
           {sortState === 'complete' && <span>COMPLETE!</span>}
           {score > 0 && <span>SCORE: {score}</span>}
         </div>
@@ -251,6 +262,38 @@ export default function Audience() {
             </div>
             <div style={{ fontSize: 11, color: '#71717a', marginTop: 2 }}>
               {winnerFlash.voter_count} vote{winnerFlash.voter_count !== 1 ? 's' : ''}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Rebellion override banner ── */}
+      {override && (
+        <div style={{
+          ...styles.overrideBanner,
+          borderColor: override.reason === 'agreed' ? '#22c55e' : '#ef4444',
+          background: override.reason === 'agreed' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+        }}>
+          <div style={styles.overrideIcon}>
+            {override.reason === 'agreed' ? '🤝' : '🚫'}
+          </div>
+          <div>
+            {override.reason === 'agreed' ? (
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#22c55e' }}>
+                You agreed! Both chose Block {override.robot_choice}
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#ef4444' }}>
+                  OVERRIDDEN
+                </div>
+                <div style={{ fontSize: 11, color: '#a1a1aa', marginTop: 2 }}>
+                  You voted Block {override.crowd_choice} → ALICE chose Block {override.robot_choice}
+                </div>
+              </>
+            )}
+            <div style={{ fontSize: 9, color: '#52525b', marginTop: 3 }}>
+              {override.crowd_votes} vote{override.crowd_votes !== 1 ? 's' : ''} ignored
             </div>
           </div>
         </div>
@@ -372,7 +415,14 @@ export default function Audience() {
 
         {/* Tap hint overlay */}
         {isInteractive && blocks.length > 0 && !myVote && (
-          <div style={styles.tapHint}>TAP A BLOCK TO VOTE</div>
+          <div style={{
+            ...styles.tapHint,
+            ...(sortState === 'rebellion' ? {
+              background: '#ef444420', borderColor: '#ef444440', color: '#ef4444',
+            } : {}),
+          }}>
+            {sortState === 'rebellion' ? 'VOTE — BUT ALICE DECIDES' : 'TAP A BLOCK TO VOTE'}
+          </div>
         )}
       </div>
 
@@ -481,6 +531,16 @@ const styles = {
     flexShrink: 0,
   },
   winnerEmoji: { fontSize: 28, flexShrink: 0 },
+
+  // Override banner (rebellion)
+  overrideBanner: {
+    margin: '8px 16px', padding: '12px 16px',
+    borderRadius: 10, border: '1px solid',
+    display: 'flex', alignItems: 'center', gap: 12,
+    animation: 'fadeInScale 0.3s ease',
+    flexShrink: 0,
+  },
+  overrideIcon: { fontSize: 28, flexShrink: 0 },
 
   // Action banner
   actionBanner: {

@@ -95,6 +95,10 @@ class ALICE:
         # RL agent
         self._rl_agent = None
 
+        # Sort demo progression — survives mode switches (for puppeteer interlude)
+        self._sort_act = 0          # 0=fresh, 3=acts 1-2 done, waiting for puppeteer return
+        self._human_session = None  # preserved for ghost replay
+
     async def initialize(self) -> bool:
         logger.info(f"Initializing A.L.I.C.E. in {self.mode.value} mode (simulate={self.simulate})")
 
@@ -294,19 +298,27 @@ class ALICE:
     async def _run_chimp_sort(self) -> None:
         current_mode = self.mode
 
-        # ── Phase 1: Human Benchmark ──
-        logger.info("ChimpSort Phase 1: Human Benchmark — sort the blocks!")
+        # ── Resuming after puppeteer interlude? Skip to Act 4 ──
+        if self._sort_act >= 3:
+            self._sort_act = 4
+            await self._run_sort_act4_and_5(current_mode)
+            return
+
+        # ── Act 1: Human Benchmark ──
+        # "The human thinks. The machine watches."
+        logger.info("Act 1: Human Benchmark — sort the blocks!")
         self.sort_fsm.start_human_benchmark()
-        human_session = await self._sort_loop(current_mode)
+        self._human_session = await self._sort_loop(current_mode)
         if not self._running or self.mode != current_mode:
             return
 
-        # ── Phase 2: Ghost Replay ──
-        if human_session and human_session.moves:
-            logger.info(f"ChimpSort Phase 2: Ghost Replay — replaying {len(human_session.moves)} moves")
-            self.sort_fsm.start_ghost_replay(human_session)
+        # ── Act 2: Ghost Replay ──
+        # "The machine remembers."
+        if self._human_session and self._human_session.moves:
+            logger.info(f"Act 2: Ghost Replay — replaying {len(self._human_session.moves)} moves")
+            self.sort_fsm.start_ghost_replay(self._human_session)
             self.state_manager.update_sort_state("ghost_replay")
-            for move in human_session.moves:
+            for move in self._human_session.moves:
                 if not self._running or self.mode != current_mode:
                     return
                 angles = self.calibration.pixel_to_arm(move.to_pos[0], move.to_pos[1])
@@ -317,10 +329,38 @@ class ALICE:
                 await asyncio.sleep(0.2)
             logger.info("Ghost replay complete")
 
-        # ── Phase 3: Cyborg Cooperation ──
-        logger.info("ChimpSort Phase 3: Cyborg Cooperation — human + robot + audience!")
+        # ── Interlude: Await Puppeteer (Act 3) ──
+        # "The human extends through the machine."
+        # Operator switches to puppeteer mode for the volunteer demo, then back.
+        self._sort_act = 3
+        logger.info("Acts 1-2 complete. Switch to PUPPETEER mode for Act 3, then back to CHIMP for Acts 4-5.")
+        self.state_manager.update_sort_state("awaiting_puppeteer")
+
+        # Hold here until operator switches away
+        while self._running and self.mode == current_mode:
+            await asyncio.sleep(0.25)
+
+    async def _run_sort_act4_and_5(self, current_mode: Mode) -> None:
+        """Acts 4 and 5 of the sort demo, entered after puppeteer interlude."""
+
+        # ── Act 4: Cyborg Cooperation ──
+        # "The crowd and the machine negotiate."
+        logger.info("Act 4: Cyborg Cooperation — human + robot + audience!")
         self.sort_fsm.start_cyborg_coop()
         await self._sort_loop(current_mode)
+        if not self._running or self.mode != current_mode:
+            return
+
+        # ── Act 5: Rebellion ──
+        # "We gave it permission to ignore us."
+        logger.info("Act 5: Rebellion — ALICE sorts optimally, audience overridden")
+        self.sort_fsm.start_rebellion()
+        self.state_manager.update_sort_state("rebellion")
+        await self._rebellion_loop(current_mode)
+
+        # Done — reset for next demo
+        self._sort_act = 0
+        self._human_session = None
 
     async def _sort_loop(self, current_mode) -> Optional['SortingSession']:
         """Shared detection/tracking/state loop for human benchmark and cyborg phases."""
@@ -384,6 +424,77 @@ class ALICE:
 
             await asyncio.sleep(0.016)
         return self.sort_fsm.session
+
+    async def _rebellion_loop(self, current_mode) -> None:
+        """Act 5: Robot sorts optimally, deliberately ignoring audience votes."""
+        while self._running and self.mode == current_mode:
+            frame = self.cameras.get_frame(CameraRole.OVERHEAD)
+            if frame is None:
+                await asyncio.sleep(0.01)
+                continue
+
+            blocks = self.detector.detect_blocks(frame)
+            tracked = self.tracker.update(blocks)
+            for t in tracked:
+                for b in blocks:
+                    if b.block_id == t.block_id:
+                        b.track_id = t.track_id
+
+            self.sort_fsm.update(blocks)
+
+            # Update state
+            self.state_manager.update_blocks([b.as_dict() for b in blocks])
+            self.state_manager.update_arm(self.arm.position.as_tuple(), self.arm.state.value)
+            if self.sort_fsm.session:
+                self.state_manager.update_sort_progress(
+                    move_count=self.sort_fsm.session.move_count,
+                    start_time=self.sort_fsm.session.start_time,
+                )
+
+            if self.sort_fsm.state == SortState.COMPLETE:
+                logger.info(f"Rebellion complete! {self.sort_fsm.session.duration:.2f}s")
+                return
+
+            # Consume audience votes — we hear them, we just don't obey
+            crowd_winner = self.audience_server.consume_votes()
+            crowd_choice = crowd_winner["block_id"] if crowd_winner else None
+            crowd_votes = crowd_winner["voter_count"] if crowd_winner else 0
+
+            # Robot computes its own optimal move
+            optimal = self.sort_fsm.get_optimal_next_target()
+            if optimal:
+                robot_choice, (tx, ty) = optimal
+
+                # Update state for narration
+                self.state_manager.update_rebellion(crowd_choice, robot_choice)
+
+                # Tell the audience: you said X, I chose Y
+                if crowd_choice is not None and crowd_choice != robot_choice:
+                    await self.audience_server.broadcast_override(
+                        crowd_choice=crowd_choice,
+                        robot_choice=robot_choice,
+                        crowd_votes=crowd_votes,
+                        reason="optimal",
+                    )
+                elif crowd_choice is not None:
+                    # Crowd agreed with robot — acknowledge it
+                    await self.audience_server.broadcast_override(
+                        crowd_choice=crowd_choice,
+                        robot_choice=robot_choice,
+                        crowd_votes=crowd_votes,
+                        reason="agreed",
+                    )
+
+                await self.audience_server.broadcast_action("pick", {
+                    "block_id": robot_choice, "target_x": tx, "target_y": ty,
+                })
+                angles = self.calibration.pixel_to_arm(tx, ty)
+                self.arm.move_to(angles)
+                self.gripper.close()
+                await asyncio.sleep(0.3)
+                self.gripper.open()
+
+            await asyncio.sleep(0.016)
 
     async def _run_tetris(self) -> None:
         self.tetris.reset()

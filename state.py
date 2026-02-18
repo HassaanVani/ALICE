@@ -31,6 +31,8 @@ class AliceState:
     puppeteer_recording: bool = False
     calibration_points: int = 0
     calibration_ready: bool = False
+    rebellion_crowd_choice: Optional[int] = None
+    rebellion_robot_choice: Optional[int] = None
     detected_blocks: List[Dict] = field(default_factory=list)
     timestamp: float = 0.0
 
@@ -53,6 +55,8 @@ class AliceState:
             "puppeteer_recording": self.puppeteer_recording,
             "calibration_points": self.calibration_points,
             "calibration_ready": self.calibration_ready,
+            "rebellion_crowd_choice": self.rebellion_crowd_choice,
+            "rebellion_robot_choice": self.rebellion_robot_choice,
             "detected_blocks": self.detected_blocks,
             "timestamp": self.timestamp,
         }
@@ -128,6 +132,11 @@ class AliceStateManager:
 
     def update_puppeteer_recording(self, recording: bool) -> None:
         self._state.puppeteer_recording = recording
+        self._notify()
+
+    def update_rebellion(self, crowd_choice: Optional[int], robot_choice: Optional[int]) -> None:
+        self._state.rebellion_crowd_choice = crowd_choice
+        self._state.rebellion_robot_choice = robot_choice
         self._notify()
 
     def update_calibration(self, points: int = 0, ready: bool = False) -> None:

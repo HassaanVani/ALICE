@@ -10,7 +10,9 @@ class SortState(Enum):
     IDLE = "idle"
     HUMAN_BENCHMARK = "human_benchmark"
     GHOST_REPLAY = "ghost_replay"
+    AWAITING_PUPPETEER = "awaiting_puppeteer"
     CYBORG_COOP = "cyborg_coop"
+    REBELLION = "rebellion"
     COMPLETE = "complete"
 
 
@@ -94,6 +96,11 @@ class ChimpSortFSM:
     def start_cyborg_coop(self) -> None:
         self._session = SortingSession(start_time=time.time())
         self._transition(SortState.CYBORG_COOP)
+
+    def start_rebellion(self) -> None:
+        self._session = SortingSession(start_time=time.time())
+        self._block_positions.clear()
+        self._transition(SortState.REBELLION)
     
     def stop(self) -> Optional[SortingSession]:
         if self._session:
@@ -206,6 +213,21 @@ class ChimpSortFSM:
                 target_y = self._sorted_zone[1] + 50
                 return (block_id, (target_x, target_y))
 
+        return None
+
+    def get_optimal_next_target(self) -> Optional[Tuple[int, Tuple[int, int]]]:
+        """Pure greedy optimal: next block in sequence that isn't already placed.
+        Used in rebellion mode — ignores audience input entirely."""
+        for target_id in range(1, 17):
+            if target_id not in self._block_positions:
+                continue
+            pos = self._block_positions[target_id]
+            target_x = self._sorted_zone[0] + (target_id - 1) * 50
+            target_y = self._sorted_zone[1] + 50
+            # Skip if already in position
+            if not self._significant_move(pos, (target_x, target_y), threshold=20):
+                continue
+            return (target_id, (target_x, target_y))
         return None
     
     def get_ghost_replay_moves(self) -> List[MoveRecord]:
