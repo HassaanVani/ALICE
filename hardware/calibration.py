@@ -1,10 +1,13 @@
 import json
+import logging
 import math
 from pathlib import Path
 from typing import Tuple, List, Optional
 from dataclasses import dataclass, asdict
 
 import numpy as np
+
+logger = logging.getLogger("Calibration")
 
 
 @dataclass
@@ -175,5 +178,5 @@ class CalibrationManager:
             
             return True
         except Exception as e:
-            print(f"[Calibration] Load failed: {e}")
+            logger.error(f"Load failed: {e}")
             return False

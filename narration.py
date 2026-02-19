@@ -98,7 +98,6 @@ class NarrationService:
 
     def _build_prompt(self, state) -> Optional[str]:
         """Build a mode-specific prompt from current state."""
-        import time
         from narration_prompts import (
             chimp_sort_prompt, tetris_prompt, puppeteer_prompt,
             calibration_prompt, mode_switch_prompt, rebellion_prompt,
@@ -180,7 +179,6 @@ class NarrationService:
         if not self._state_manager:
             return None
         state = self._state_manager.state
-        import time
 
         if state.mode == "demo":
             if state.sort_state == "scrambling":

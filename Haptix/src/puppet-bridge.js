@@ -1,5 +1,7 @@
+import { PUPPET_WS_URL } from './ws-config.js';
+
 export class PuppetBridge {
-    constructor(serverUrl = 'ws://localhost:8766') {
+    constructor(serverUrl = PUPPET_WS_URL) {
         this.serverUrl = serverUrl;
         this.socket = null;
         this.connected = false;
@@ -92,7 +94,7 @@ export class PuppetBridge {
                 this.lastHeartbeat = msg.timestamp;
                 this.callbacks.onHeartbeat?.(msg.timestamp);
             }
-        } catch (e) { }
+        } catch { /* non-JSON message — ignore */ }
     }
 
     updateLandmarks(landmarks) {

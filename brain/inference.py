@@ -1,7 +1,10 @@
+import logging
 from typing import Tuple, Dict, Optional, List
 from pathlib import Path
 
 import numpy as np
+
+logger = logging.getLogger("Inference")
 import torch
 import torch.nn.functional as F
 
@@ -132,7 +135,7 @@ class InferencePipeline:
             self._state_model.to(self._device)
             return True
         except Exception as e:
-            print(f"[InferencePipeline] Failed to load state weights: {e}")
+            logger.error(f"Failed to load state weights: {e}")
             return False
 
     def load_weights(self, path: Path) -> bool:
@@ -141,7 +144,7 @@ class InferencePipeline:
             self.model.to(self._device)
             return True
         except Exception as e:
-            print(f"[InferencePipeline] Failed to load weights: {e}")
+            logger.error(f"Failed to load weights: {e}")
             return False
 
 

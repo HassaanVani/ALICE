@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-
-const WS_URL = `ws://${window.location.hostname || 'localhost'}:8767`;
+import { AUDIENCE_WS_URL } from '../ws-config.js';
 
 const REACTIONS = ['👏', '🔥', '😮', '💀', '🤖', '🧠'];
 
@@ -45,7 +44,7 @@ export default function Audience() {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
     try {
-      const ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(AUDIENCE_WS_URL);
       wsRef.current = ws;
 
       ws.onopen = () => setConnected(true);

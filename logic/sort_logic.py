@@ -1,9 +1,12 @@
+import logging
 import time
 from typing import List, Tuple, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
 from vision.aruco_detector import BlockData
+
+logger = logging.getLogger("SortLogic")
 
 
 class SortState(Enum):
@@ -204,8 +207,8 @@ class ChimpSortFSM:
                 result = self.apply_action(block_id)
                 if result:
                     return result
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"RL agent prediction failed: {e}")
 
         # Greedy fallback
         for block_id, pos in self._block_positions.items():

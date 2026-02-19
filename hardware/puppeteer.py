@@ -1,3 +1,4 @@
+import logging
 import time
 import math
 from typing import Optional, Callable, List, Tuple
@@ -5,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
+
+logger = logging.getLogger("Puppeteer")
 
 try:
     import serial
@@ -68,7 +71,7 @@ class IMUSensor:
             time.sleep(1)
             return True
         except Exception as e:
-            print(f"[IMUSensor] Connection failed: {e}")
+            logger.warning(f"IMU connection failed: {e}")
             return False
     
     def disconnect(self) -> None:
@@ -116,9 +119,9 @@ class IMUSensor:
             values = [float(x) for x in line.split(",")]
             if len(values) >= self.AXIS_COUNT:
                 return np.array(values[:self.AXIS_COUNT])
-        except Exception:
-            pass
-        
+        except Exception as e:
+            logger.debug(f"IMU read error: {e}")
+
         return None
     
     def _simulate_movement(self) -> Tuple[float, ...]:

@@ -1,11 +1,14 @@
 """Depth camera abstraction — ABC + simulated + RealSense stub."""
 
+import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import numpy as np
+
+logger = logging.getLogger("DepthCamera")
 
 
 @dataclass
@@ -109,18 +112,18 @@ class RealSenseDepthCamera(DepthCamera):
             self._pipeline.start(config)
             return True
         except ImportError:
-            print("[RealSenseDepthCamera] pyrealsense2 not installed")
+            logger.warning("pyrealsense2 not installed")
             return False
         except Exception as e:
-            print(f"[RealSenseDepthCamera] Failed to open: {e}")
+            logger.error(f"Failed to open RealSense: {e}")
             return False
 
     def close(self) -> None:
         if self._pipeline:
             try:
                 self._pipeline.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error stopping RealSense pipeline: {e}")
             self._pipeline = None
 
     def read(self) -> Optional[DepthFrame]:
@@ -137,7 +140,8 @@ class RealSenseDepthCamera(DepthCamera):
             color = np.asanyarray(color_frame.get_data())
             self._last_depth = depth
             return DepthFrame(color=color, depth=depth, timestamp=time.time())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"RealSense read failed: {e}")
             return None
 
     def get_depth_at(self, x: int, y: int) -> float:

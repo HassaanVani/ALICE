@@ -98,8 +98,8 @@ class PuppetServer:
         if self._state_manager:
             try:
                 await websocket.send(self._state_manager.get_state_sync_message())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to send initial state sync: {e}")
 
         try:
             async for message in websocket:
@@ -182,8 +182,8 @@ class PuppetServer:
     async def _send_error(self, websocket: WebSocketServerProtocol, detail: str) -> None:
         try:
             await websocket.send(json.dumps({"type": "error", "detail": detail}))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to send error to client: {e}")
 
     async def _handle_hand_position(self, data: dict, websocket: WebSocketServerProtocol) -> None:
         pos = data.get("position", {})

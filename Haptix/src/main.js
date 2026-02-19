@@ -110,7 +110,7 @@ class App {
 
         this.puppetBridge = new PuppetBridge();
         this.puppetBridge
-            .onConnect(() => console.log('Puppet connected'))
+            .onConnect(() => { /* puppet connected */ })
             .onArmUpdate((data) => {
                 if (this.puppetModeActive && this.roboticArmScene) {
                     this.roboticArmScene.setArmAngles(data.angles, data.gripper);

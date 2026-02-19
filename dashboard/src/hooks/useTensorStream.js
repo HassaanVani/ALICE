@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-
-const WS_URL = `ws://${window.location.hostname || 'localhost'}:8765`;
+import { TENSOR_WS_URL } from '../ws-config.js';
 
 /**
  * Decodes binary activation data from the ALICE backend.
@@ -43,8 +42,8 @@ function decodeBinaryActivations(buffer) {
 
       layers.push({ name, values });
     }
-  } catch (err) {
-    console.warn('[useTensorStream] Decode error:', err);
+  } catch {
+    // Malformed binary frame — skip silently
   }
 
   return layers;
@@ -59,12 +58,11 @@ export function useTensorStream() {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
     try {
-      const ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(TENSOR_WS_URL);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('[useTensorStream] Connected');
         // Server auto-broadcasts tensors to all clients — no subscription needed
       };
 

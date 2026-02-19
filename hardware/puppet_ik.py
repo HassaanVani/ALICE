@@ -1,5 +1,7 @@
 import logging
 import math
+
+logger = logging.getLogger("PuppetIK")
 import time
 import json
 from typing import Tuple, Optional, List, Callable
@@ -304,7 +306,7 @@ class TeachingRecorder:
             
             return True
         except Exception as e:
-            print(f"[TeachingRecorder] Load failed: {e}")
+            logger.error(f"Load failed: {e}")
             return False
 
 

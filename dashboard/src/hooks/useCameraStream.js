@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-
-const WS_URL = `ws://${window.location.hostname || 'localhost'}:8765`;
+import { TENSOR_WS_URL } from '../ws-config.js';
 
 export function useCameraStream() {
   const [cameraConnected, setCameraConnected] = useState(false);
@@ -12,13 +11,12 @@ export function useCameraStream() {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
     try {
-      const ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(TENSOR_WS_URL);
       ws.binaryType = 'blob';
       wsRef.current = ws;
 
       ws.onopen = () => {
         setCameraConnected(true);
-        console.log('[useCameraStream] Connected');
         // Request camera stream from server (server expects "command" field)
         ws.send(JSON.stringify({ command: 'stream_camera' }));
       };
@@ -56,7 +54,6 @@ export function useCameraStream() {
       ws.onclose = () => {
         setCameraConnected(false);
         wsRef.current = null;
-        console.log('[useCameraStream] Disconnected, reconnecting...');
         reconnectTimer.current = setTimeout(connect, 2000);
       };
 

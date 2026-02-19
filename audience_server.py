@@ -130,8 +130,10 @@ class AudienceServer:
 
             async for message in websocket:
                 await self._handle_message(message, websocket, client_id)
-        except Exception:
+        except websockets.exceptions.ConnectionClosed:
             pass
+        except Exception as e:
+            logger.debug(f"Client {client_id} handler error: {e}")
         finally:
             self.clients.discard(websocket)
             self._tilts.pop(client_id, None)
@@ -324,8 +326,10 @@ class AudienceServer:
     async def _safe_send(self, websocket, message: dict) -> None:
         try:
             await websocket.send(json.dumps(message))
-        except Exception:
+        except websockets.exceptions.ConnectionClosed:
             pass
+        except Exception as e:
+            logger.debug(f"Safe send failed: {e}")
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -353,7 +357,7 @@ class AudienceServer:
         for client in self.clients.copy():
             try:
                 await client.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error closing client: {e}")
         self.clients.clear()
         logger.info("Audience server stopped")

@@ -1,5 +1,7 @@
+import { TENSOR_WS_URL } from './ws-config.js';
+
 export class TensorBridge {
-    constructor(serverUrl = 'ws://localhost:8765') {
+    constructor(serverUrl = TENSOR_WS_URL) {
         this.serverUrl = serverUrl;
         this.socket = null;
         this.connected = false;
@@ -79,7 +81,7 @@ export class TensorBridge {
                     this.lastHeartbeat = json.timestamp;
                     this.callbacks.onHeartbeat?.(json.timestamp);
                 }
-            } catch (e) { }
+            } catch { /* non-JSON message — binary handled above */ }
         }
     }
 

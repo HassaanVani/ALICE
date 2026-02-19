@@ -1,6 +1,9 @@
+import logging
 import time
 from typing import Optional
 from enum import Enum
+
+logger = logging.getLogger("MagnetDriver")
 
 try:
     import serial
@@ -49,7 +52,7 @@ class MagnetDriver:
             time.sleep(0.5)
             return True
         except Exception as e:
-            print(f"[MagnetDriver] Connection failed: {e}")
+            logger.warning(f"Connection failed: {e}")
             return False
     
     def disconnect(self) -> None:
@@ -75,7 +78,7 @@ class MagnetDriver:
             self._state = target_state
             return True
         except Exception as e:
-            print(f"[MagnetDriver] Toggle failed: {e}")
+            logger.error(f"Toggle failed: {e}")
             return False
     
     def on(self) -> bool:

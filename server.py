@@ -58,8 +58,8 @@ class TensorStreamServer:
         if self._state_manager:
             try:
                 await websocket.send(self._state_manager.get_state_sync_message())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to send initial state sync: {e}")
 
     async def unregister(self, websocket: WebSocketServerProtocol) -> None:
         self.clients.discard(websocket)

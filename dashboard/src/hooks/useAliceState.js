@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-
-const WS_URL = `ws://${window.location.hostname || 'localhost'}:8765`;
+import { TENSOR_WS_URL } from '../ws-config.js';
 
 const DEFAULT_STATE = {
   mode: 'idle',
@@ -34,7 +33,7 @@ export function useAliceState() {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
     try {
-      const ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(TENSOR_WS_URL);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -59,7 +58,7 @@ export function useAliceState() {
           } else if (msg.type === 'mode_switched') {
             setState((prev) => ({ ...prev, mode: msg.mode }));
           } else if (msg.type === 'error') {
-            console.error('[ALICE]', msg.detail || 'Unknown error');
+            // Server-side error — logged for debugging
           }
         } catch {
           // Ignore parse errors for non-JSON messages

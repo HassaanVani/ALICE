@@ -146,8 +146,8 @@ class CameraFeed:
                         for cb in self._on_error_callbacks:
                             try:
                                 cb(self, self._health)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Error callback failed: {e}")
                     if self._attempt_reconnect():
                         self._consecutive_failures = 0
                     else:
@@ -155,8 +155,8 @@ class CameraFeed:
                         for cb in self._on_error_callbacks:
                             try:
                                 cb(self, self._health)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Error callback failed: {e}")
                         logger.error(f"Camera {self.config.role.value} failed after reconnect attempts")
                         break
                 time.sleep(0.001)
