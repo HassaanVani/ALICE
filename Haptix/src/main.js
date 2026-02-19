@@ -119,6 +119,22 @@ class App {
                     document.getElementById('gesture-text').textContent =
                         `Arm: [${data.angles.map(a => a.toFixed(0)).join(', ')}]`;
                 }
+            })
+            .onPuppetState((state) => {
+                const text = document.getElementById('gesture-text');
+                if (!this.puppetModeActive || !text) return;
+
+                const labels = {
+                    idle: 'PUPPET (idle)',
+                    live: 'PUPPET MODE',
+                    recording: 'TEACHING...',
+                    playback: 'PLAYBACK...'
+                };
+                text.textContent = labels[state] || `PUPPET (${state})`;
+            })
+            .onTeachingComplete((msg) => {
+                const text = document.getElementById('gesture-text');
+                if (text) text.textContent = `Saved: ${msg.name} (${msg.frames} frames)`;
             });
 
         this.handTracker = new HandTracker(video, handCanvas, (landmarks) => {
@@ -320,14 +336,10 @@ class App {
 
             if (keys['t'] && !prevKeys['t'] && this.puppetModeActive) {
                 if (this.puppetBridge.connected) {
-                    if (!this._isTeaching) {
-                        this._isTeaching = true;
+                    if (this.puppetBridge.puppetState !== 'recording') {
                         this.puppetBridge.startTeaching('motion_' + Date.now());
-                        document.getElementById('gesture-text').textContent = 'TEACHING...';
                     } else {
-                        this._isTeaching = false;
                         this.puppetBridge.stopTeaching();
-                        document.getElementById('gesture-text').textContent = 'PUPPET MODE';
                     }
                 }
             }

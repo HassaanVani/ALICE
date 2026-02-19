@@ -1,17 +1,16 @@
 import asyncio
 import argparse
 import logging
-import time as _time
+import threading
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 from config import load_config, AliceConfig
 from selftest import SelfTest
 from state import AliceStateManager
 from recording import SessionRecorder, SessionPlayer
 from hardware import (ArmController, MagnetDriver, CalibrationManager,
-                      PuppeteerController, IMUSensor, PuppeteerState,
                       create_gripper, KinestheticTeacher)
 from vision import (CameraManager, CameraConfig, CameraRole, CameraHealth,
                     ArucoDetector, BlockTracker)
@@ -57,7 +56,6 @@ class ALICE:
         self.inference: Optional[InferencePipeline] = None
         self.sort_fsm: Optional[ChimpSortFSM] = None
         self.tetris: Optional[TetrisAgent] = None
-        self.puppeteer: Optional[PuppeteerController] = None
         self.kinesthetic: Optional[KinestheticTeacher] = None
 
         self._running = False
@@ -79,9 +77,6 @@ class ALICE:
             simulate=config.simulate,
         )
         self.puppet_server.set_state_manager(self.state_manager)
-
-        # Queue for hand data from PuppetServer → _run_puppeteer loop
-        self._hand_data_queue: asyncio.Queue[Tuple[tuple, bool]] = asyncio.Queue(maxsize=5)
 
         # Audience
         self.audience_server = AudienceServer(
@@ -110,8 +105,9 @@ class ALICE:
 
         try:
             hw = self.config.hardware
-            arm_kwargs = {"simulate": self.simulate}
-            magnet_kwargs = {"simulate": self.simulate}
+            serial_lock = threading.Lock()
+            arm_kwargs = {"simulate": self.simulate, "serial_lock": serial_lock}
+            magnet_kwargs = {"simulate": self.simulate, "serial_lock": serial_lock}
             if hw.arm_port:
                 arm_kwargs["port"] = hw.arm_port
             if hw.magnet_port:
@@ -121,10 +117,17 @@ class ALICE:
             self.magnet = MagnetDriver(**magnet_kwargs)
             self.gripper = create_gripper("magnet", self.magnet)
             self.calibration = CalibrationManager()
-            self.kinesthetic = KinestheticTeacher(self.arm)
 
             if not self.arm.connect():
-                logger.warning("Arm connection failed, running in simulation")
+                logger.warning("Arm connection failed, falling back to simulation")
+                self.simulate = True
+                self.arm = ArmController(simulate=True, serial_lock=serial_lock)
+                self.arm.connect()
+                self.magnet = MagnetDriver(simulate=True, serial_lock=serial_lock)
+                self.gripper = create_gripper("magnet", self.magnet)
+
+            # Created after fallback so it always references the live arm
+            self.kinesthetic = KinestheticTeacher(self.arm)
 
             self.calibration.load()
 
@@ -167,21 +170,8 @@ class ALICE:
             self.puppet_server.gripper = self.gripper
             self.puppet_server._owns_hardware = False
 
-            # Wire hand-update callback: PuppetServer → _run_puppeteer loop
-            def _on_hand_update(angles: tuple, is_pinching: bool) -> None:
-                try:
-                    self._hand_data_queue.put_nowait((angles, is_pinching))
-                except asyncio.QueueFull:
-                    # Drop oldest, keep latest
-                    try:
-                        self._hand_data_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
-                    try:
-                        self._hand_data_queue.put_nowait((angles, is_pinching))
-                    except asyncio.QueueFull:
-                        pass
-            self.puppet_server.on_hand_update(_on_hand_update)
+            # Wire tensor server for activation forwarding to dashboard
+            self.puppet_server.set_tensor_server(self._ws_server)
 
             # Load RL agent if available
             self._load_rl_agent()
@@ -212,20 +202,10 @@ class ALICE:
             self.tetris.on_action(self._on_tetris_action)
             self._tetris_controller = self._create_tetris_controller()
 
-        elif mode == Mode.PUPPETEER:
-            hw = self.config.hardware
-            imu_kwargs = {"simulate": self.simulate}
-            if hw.imu_port:
-                imu_kwargs["port"] = hw.imu_port
-            sensor = IMUSensor(**imu_kwargs)
-            self.puppeteer = PuppeteerController(self.arm, sensor)
-            self.puppeteer.on_frame(self._on_puppeteer_frame)
-
     def _teardown_mode(self) -> None:
         """Clean up current mode's subsystems."""
-        if self.puppeteer:
-            self.puppeteer.stop()
-            self.puppeteer = None
+        if self.mode == Mode.PUPPETEER:
+            self.puppet_server.stop_puppet()
         if hasattr(self, '_tetris_controller') and self._tetris_controller:
             self._tetris_controller.stop()
             self._tetris_controller = None
@@ -270,9 +250,6 @@ class ALICE:
     def _on_tetris_action(self, action) -> None:
         logger.debug(f"Tetris action: {action.name}")
 
-    def _on_puppeteer_frame(self, frame) -> None:
-        logger.debug(f"Arm angles: {[f'{a:.1f}' for a in frame.angles]}")
-
     async def run(self) -> None:
         self._running = True
         logger.info("Starting main loop")
@@ -283,17 +260,17 @@ class ALICE:
         if self.config.recording.enabled:
             self.recorder.start()
 
-        # Build async tasks
-        tasks = [
-            asyncio.create_task(self._ws_server.start()),
-            asyncio.create_task(self.puppet_server.start()),
-            asyncio.create_task(self._mode_loop()),
-            asyncio.create_task(self.audience_server.start()),
-            asyncio.create_task(self.narration.start()),
+        # Build async tasks — store references for cancellation
+        self._tasks = [
+            asyncio.create_task(self._ws_server.start(), name="tensor_server"),
+            asyncio.create_task(self.puppet_server.start(), name="puppet_server"),
+            asyncio.create_task(self._mode_loop(), name="mode_loop"),
+            asyncio.create_task(self.audience_server.start(), name="audience_server"),
+            asyncio.create_task(self.narration.start(), name="narration"),
         ]
 
         try:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(*self._tasks, return_exceptions=True)
         except asyncio.CancelledError:
             pass
 
@@ -676,126 +653,20 @@ class ALICE:
         cv2.destroyAllWindows()
 
     async def _run_puppeteer(self) -> None:
-        """Puppeteer mode — Haptix hand-tracking drives the arm (IMU as fallback).
+        """Puppeteer mode — hand tracking via Haptix.
 
-        Data flow:
-          Haptix HandTracker → PuppetBridge (WS) → PuppetServer._handle_hand_position
-            → HandToArmMapper → arm.move_to()  (already done in PuppetServer)
-            → on_hand_update callback → _hand_data_queue → this loop
-            → state broadcast + puppeteer activation broadcast
-
-        The IMU-based PuppeteerController is kept as a fallback for when
-        physical IMU hardware is connected and no Haptix client is streaming.
+        PuppetServer owns all control, recording, playback, and broadcasting.
+        This loop just enters live mode and waits for a mode switch.
         """
-        logger.info("Puppeteer mode — hand tracking active (Haptix WS or IMU fallback)")
-        logger.info("  Keys: 'l' live (IMU), 'r' record, 'p' playback, 'k' kinesthetic, 'q' quit")
+        logger.info("Puppeteer mode — hand tracking via Haptix")
+        self.puppet_server.go_live()
         current_mode = self.mode
-        self.state_manager.update_puppeteer_state("live")
-        last_hand_time = 0.0
-        HAND_TIMEOUT = 1.0  # seconds before falling back to IMU
-
         while self._running and self.mode == current_mode:
-            key_pressed = None
-
-            try:
-                import msvcrt
-                if msvcrt.kbhit():
-                    key_pressed = msvcrt.getch().decode().lower()
-            except ImportError:
-                import sys, select
-                if select.select([sys.stdin], [], [], 0)[0]:
-                    key_pressed = sys.stdin.read(1).lower()
-
-            if key_pressed == 'q':
-                break
-            elif key_pressed == 'l':
-                if self.puppeteer.state == PuppeteerState.IDLE:
-                    self.puppeteer.start_live()
-                    self.state_manager.update_puppeteer_state("live")
-                    logger.info("LIVE mode (IMU) — Your arm controls the robot!")
-                else:
-                    self.puppeteer.stop()
-                    self.state_manager.update_puppeteer_state("idle")
-                    logger.info("Stopped")
-            elif key_pressed == 'r':
-                if self.puppeteer.state == PuppeteerState.IDLE:
-                    self.puppeteer.start_recording()
-                    self.state_manager.update_puppeteer_state("recording")
-                    logger.info("RECORDING — Move your arm...")
-                elif self.puppeteer.state == PuppeteerState.RECORDING:
-                    recording = self.puppeteer.stop_recording()
-                    self.state_manager.update_puppeteer_state("idle")
-                    logger.info(f"Recorded {recording.frame_count} frames ({recording.duration:.1f}s)")
-            elif key_pressed == 'p':
-                if self.puppeteer.recording:
-                    self.puppeteer.start_playback()
-                    self.state_manager.update_puppeteer_state("playback")
-                    logger.info("PLAYBACK — Replaying recording...")
-            elif key_pressed == 'k':
-                if not self.kinesthetic.is_recording:
-                    self.kinesthetic.start("kinesthetic_" + str(int(_time.time())))
-                    logger.info("KINESTHETIC TEACHING — Move the arm by hand...")
-                else:
-                    motion = self.kinesthetic.stop()
-                    if motion:
-                        logger.info(f"Kinesthetic recording: {len(motion.frames)} frames")
-
-            # ── Primary: consume hand data from Haptix via PuppetServer ──
-            hand_data_received = False
-            while not self._hand_data_queue.empty():
-                try:
-                    angles, is_pinching = self._hand_data_queue.get_nowait()
-                    hand_data_received = True
-                    last_hand_time = _time.time()
-
-                    # arm.move_to already called by PuppetServer, just broadcast state
-                    self.state_manager.update_arm(tuple(angles), "moving")
-                    self.state_manager.update_puppeteer_state("live")
-
-                    # Broadcast as neural activations to the tensor stream
-                    from hardware.puppeteer import ArmFrame
-                    frame = ArmFrame(
-                        timestamp=_time.time(),
-                        angles=tuple(angles),
-                    )
-                    await self._broadcast_puppeteer_activations(frame)
-                except asyncio.QueueEmpty:
-                    break
-
-            # ── Fallback: IMU-based PuppeteerController when no hand data ──
-            if not hand_data_received and (_time.time() - last_hand_time) > HAND_TIMEOUT:
-                if self.puppeteer.state != PuppeteerState.IDLE:
-                    frame = self.puppeteer.update()
-                    if frame:
-                        await self._broadcast_puppeteer_activations(frame)
-                        self.state_manager.update_arm(
-                            tuple(frame.angles),
-                            "moving"
-                        )
-
-            if self.kinesthetic.is_recording:
-                self.kinesthetic.update()
-
-            await asyncio.sleep(0.033)
-
-        if self.puppeteer:
-            self.puppeteer.stop()
-
-    async def _broadcast_puppeteer_activations(self, frame) -> None:
-        if not self._ws_server.clients:
-            return
-
-        data = self.puppeteer.get_websocket_payload(frame)
-        dead_clients = set()
-        for client in self._ws_server.clients.copy():
-            try:
-                await client.send(data)
-            except Exception:
-                dead_clients.add(client)
-        for client in dead_clients:
-            self._ws_server.clients.discard(client)
+            await asyncio.sleep(0.1)
+        self.puppet_server.stop_puppet()
 
     async def shutdown(self) -> None:
+        SHUTDOWN_TIMEOUT = 5.0  # seconds to wait before force-cancelling tasks
         logger.info("Shutting down")
         self._running = False
 
@@ -803,10 +674,24 @@ class ALICE:
         if self.recorder.is_recording:
             self.recorder.stop()
 
+        # Stop services (each has its own internal _streaming flag)
         await self.narration.stop()
         await self._ws_server.stop()
         await self.puppet_server.stop()
         await self.audience_server.stop()
+
+        # Cancel all async tasks with a timeout
+        if hasattr(self, '_tasks'):
+            for task in self._tasks:
+                if not task.done():
+                    task.cancel()
+            # Wait for tasks to finish cancellation, with a hard timeout
+            done, pending = await asyncio.wait(
+                self._tasks, timeout=SHUTDOWN_TIMEOUT
+            )
+            for task in pending:
+                logger.warning(f"Force-cancelling stuck task: {task.get_name()}")
+                task.cancel()
 
         if self.cameras:
             self.cameras.close_all()
@@ -830,7 +715,6 @@ async def main():
     parser.add_argument("--ws-port", type=int, default=None)
     parser.add_argument("--arm-port", type=str, default=None, help="Serial port for arm controller")
     parser.add_argument("--magnet-port", type=str, default=None, help="Serial port for magnet driver")
-    parser.add_argument("--imu-port", type=str, default=None, help="Serial port for IMU sensor")
     parser.add_argument("--record", action="store_true", default=False, help="Enable session recording")
     parser.add_argument("--replay", type=str, default=None, help="Replay a recorded session")
     args = parser.parse_args()
@@ -847,8 +731,6 @@ async def main():
         cli_overrides.setdefault("hardware", {}).setdefault("arm", {})["port"] = args.arm_port
     if args.magnet_port:
         cli_overrides.setdefault("hardware", {}).setdefault("magnet", {})["port"] = args.magnet_port
-    if args.imu_port:
-        cli_overrides.setdefault("hardware", {}).setdefault("imu", {})["port"] = args.imu_port
     if args.record:
         cli_overrides.setdefault("recording", {})["enabled"] = True
 

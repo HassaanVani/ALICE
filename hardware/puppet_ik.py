@@ -316,49 +316,68 @@ class MotionPlayer:
         self.magnet = magnet_driver
         self._playing = False
         self._current_motion: Optional[LearnedMotion] = None
-        self._frame_index = 0
         self._playback_speed = 1.0
+        self._start_time: float = 0.0
+        self._last_frame_index: int = 0
         self._on_complete: Optional[Callable[[], None]] = None
-    
+
     @property
     def is_playing(self) -> bool:
         return self._playing
-    
+
     def on_complete(self, callback: Callable[[], None]) -> "MotionPlayer":
         self._on_complete = callback
         return self
-    
+
     def set_speed(self, speed: float) -> None:
         self._playback_speed = max(0.1, min(5.0, speed))
-    
+
     def play(self, motion: LearnedMotion) -> bool:
         if not motion.frames:
             return False
-        
+
         self._current_motion = motion
-        self._frame_index = 0
+        self._start_time = time.time()
+        self._last_frame_index = 0
         self._playing = True
         return True
-    
+
     def stop(self) -> None:
         self._playing = False
         self._current_motion = None
-        self._frame_index = 0
-    
+        self._last_frame_index = 0
+
     def update(self) -> bool:
         if not self._playing or not self._current_motion:
             return False
-        
-        if self._frame_index >= len(self._current_motion.frames):
+
+        frames = self._current_motion.frames
+        if not frames:
+            self._playing = False
+            return False
+
+        # Timestamp-based frame selection scaled by playback speed
+        elapsed = (time.time() - self._start_time) * self._playback_speed
+        recording_start = frames[0].timestamp
+        target_time = recording_start + elapsed
+
+        # Find the frame closest to the target timestamp
+        frame_index = self._last_frame_index
+        while frame_index < len(frames) - 1 and frames[frame_index + 1].timestamp <= target_time:
+            frame_index += 1
+
+        if target_time > frames[-1].timestamp:
+            # Playback complete — apply last frame then finish
+            frame = frames[-1]
+            self.arm.move_to(frame.joint_angles, speed=2.0)
+            self.magnet.toggle(frame.gripper_state)
             self._playing = False
             if self._on_complete:
                 self._on_complete()
             return False
-        
-        frame = self._current_motion.frames[self._frame_index]
-        
+
+        frame = frames[frame_index]
         self.arm.move_to(frame.joint_angles, speed=2.0)
         self.magnet.toggle(frame.gripper_state)
-        
-        self._frame_index += 1
+        self._last_frame_index = frame_index
         return True

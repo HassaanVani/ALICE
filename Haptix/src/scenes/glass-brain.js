@@ -14,6 +14,7 @@ export function createGlassBrainScene(THREE, tensorBridge = null) {
     const GRID_SIZE = 16;
     const VOXEL_SIZE = 0.15;
     const LAYER_SPACING = 4;
+    const VOXELS_PER_LAYER = GRID_SIZE * GRID_SIZE * GRID_SIZE;
     const voxelLayers = [];
 
     const layerConfigs = [
@@ -29,37 +30,73 @@ export function createGlassBrainScene(THREE, tensorBridge = null) {
         { name: 'basal_ganglia', color: 0x9900ff, label: 'Basal Ganglia' }
     ];
 
+    // Shared geometry for all layers
+    const voxelGeometry = new THREE.BoxGeometry(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);
+
+    // Custom shader that supports per-instance opacity via an attribute
+    const makeVoxelMaterial = (color) => {
+        const c = new THREE.Color(color);
+        return new THREE.ShaderMaterial({
+            transparent: true,
+            depthWrite: false,
+            uniforms: {
+                uColor: { value: c },
+            },
+            vertexShader: `
+                attribute float instanceOpacity;
+                varying float vOpacity;
+                void main() {
+                    vOpacity = instanceOpacity;
+                    gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 uColor;
+                varying float vOpacity;
+                void main() {
+                    if (vOpacity < 0.01) discard;
+                    gl_FragColor = vec4(uColor, vOpacity);
+                }
+            `,
+        });
+    };
+
+    const dummy = new THREE.Object3D();
+
     layerConfigs.forEach((config, layerIndex) => {
-        const layerGroup = new THREE.Group();
-        layerGroup.position.x = (layerIndex - 2) * LAYER_SPACING;
-        layerGroup.userData = { name: config.name, index: layerIndex };
+        const material = makeVoxelMaterial(config.color);
 
-        const voxels = [];
-        const geometry = new THREE.BoxGeometry(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);
+        const mesh = new THREE.InstancedMesh(voxelGeometry, material, VOXELS_PER_LAYER);
+        mesh.userData = { name: config.name, index: layerIndex };
 
+        // Per-instance opacity buffer
+        const opacityArray = new Float32Array(VOXELS_PER_LAYER);
+        const opacityAttr = new THREE.InstancedBufferAttribute(opacityArray, 1);
+        mesh.geometry.setAttribute('instanceOpacity', opacityAttr);
+
+        // Pre-compute instance transforms
+        const offset = (GRID_SIZE * VOXEL_SIZE) / 2;
+        const baseOpacities = new Float32Array(VOXELS_PER_LAYER);
+        let i = 0;
         for (let x = 0; x < GRID_SIZE; x++) {
             for (let y = 0; y < GRID_SIZE; y++) {
                 for (let z = 0; z < GRID_SIZE; z++) {
-                    const material = new THREE.MeshBasicMaterial({
-                        color: config.color,
-                        transparent: true,
-                        opacity: 0
-                    });
-
-                    const voxel = new THREE.Mesh(geometry, material);
-                    const offset = (GRID_SIZE * VOXEL_SIZE) / 2;
-                    voxel.position.set(
+                    dummy.position.set(
                         (x * VOXEL_SIZE) - offset,
                         (y * VOXEL_SIZE) - offset,
                         (z * VOXEL_SIZE) - offset
                     );
-                    voxel.userData = { x, y, z, baseOpacity: 0 };
-
-                    voxels.push(voxel);
-                    layerGroup.add(voxel);
+                    dummy.updateMatrix();
+                    mesh.setMatrixAt(i, dummy.matrix);
+                    baseOpacities[i] = 0;
+                    i++;
                 }
             }
         }
+        mesh.instanceMatrix.needsUpdate = true;
+
+        // Position the layer
+        mesh.position.x = (layerIndex - 2) * LAYER_SPACING;
 
         const labelDiv = document.createElement('div');
         labelDiv.className = 'layer-label';
@@ -73,8 +110,17 @@ export function createGlassBrainScene(THREE, tensorBridge = null) {
             opacity: 0.7;
         `;
 
-        voxelLayers.push({ group: layerGroup, voxels, config, label: labelDiv });
-        scene.add(layerGroup);
+        voxelLayers.push({
+            mesh,
+            material,
+            opacityAttr,
+            baseOpacities,
+            config,
+            label: labelDiv,
+            scale: 1.0,
+            targetScale: 1.0,
+        });
+        scene.add(mesh);
     });
 
     const connectionMaterial = new THREE.LineBasicMaterial({
@@ -127,16 +173,12 @@ export function createGlassBrainScene(THREE, tensorBridge = null) {
             const data = layerData?.get(layer.config.name);
             if (!data) return;
 
-            const totalVoxels = layer.voxels.length;
             const dataLen = data.length;
-
-            layer.voxels.forEach((voxel, i) => {
-                const dataIndex = Math.floor((i / totalVoxels) * dataLen);
+            for (let i = 0; i < VOXELS_PER_LAYER; i++) {
+                const dataIndex = Math.min(Math.floor((i / VOXELS_PER_LAYER) * dataLen), dataLen - 1);
                 const value = data[dataIndex] || 0;
-                const normalized = Math.max(0, Math.min(1, value));
-
-                voxel.userData.baseOpacity = normalized * 0.8;
-            });
+                layer.baseOpacities[i] = Math.max(0, Math.min(1, value)) * 0.8;
+            }
         });
     };
 
@@ -144,26 +186,29 @@ export function createGlassBrainScene(THREE, tensorBridge = null) {
         tensorBridge.onActivation(updateVoxelsFromData);
     }
 
-    let time = 0;
-
     const update = (delta, elapsed) => {
-        time = elapsed;
-
         voxelLayers.forEach((layer, idx) => {
             const distance = Math.abs(idx - currentLayerIndex);
-            const targetScale = distance === 0 ? 1.2 : 0.8 - distance * 0.1;
+            layer.targetScale = distance === 0 ? 1.2 : 0.8 - distance * 0.1;
+            layer.scale += (layer.targetScale - layer.scale) * 0.05;
+            layer.mesh.scale.setScalar(layer.scale);
 
-            layer.group.scale.lerp(
-                new THREE.Vector3(targetScale, targetScale, targetScale),
-                0.05
-            );
+            const inFocus = distance === 0 ? 1 : 0.3;
+            const arr = layer.opacityAttr.array;
 
-            layer.voxels.forEach((voxel, i) => {
-                const { baseOpacity, x, y } = voxel.userData;
-                const pulse = Math.sin(elapsed * 2 + x * 0.2 + y * 0.2) * 0.1;
-                const inFocus = distance === 0 ? 1 : 0.3;
-                voxel.material.opacity = Math.max(0, baseOpacity + pulse) * inFocus;
-            });
+            // Batch-update per-instance opacity
+            let vi = 0;
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    for (let z = 0; z < GRID_SIZE; z++) {
+                        const base = layer.baseOpacities[vi];
+                        const pulse = Math.sin(elapsed * 2 + x * 0.2 + y * 0.2) * 0.1;
+                        arr[vi] = Math.max(0, base + pulse) * inFocus;
+                        vi++;
+                    }
+                }
+            }
+            layer.opacityAttr.needsUpdate = true;
         });
 
         connections.forEach(conn => {
@@ -177,9 +222,24 @@ export function createGlassBrainScene(THREE, tensorBridge = null) {
         currentLayerIndex += (targetLayerIndex - currentLayerIndex) * 0.1;
     };
 
+    const dispose = () => {
+        voxelGeometry.dispose();
+        voxelLayers.forEach(layer => {
+            layer.material.dispose();
+            layer.mesh.dispose();
+        });
+        connections.forEach(conn => {
+            conn.geometry.dispose();
+            conn.material.dispose();
+        });
+        shellGeometry.dispose();
+        shellMaterial.dispose();
+    };
+
     return {
         scene,
         update,
+        dispose,
         defaultDistance: 12,
         minDistance: 4,
         maxDistance: 30,

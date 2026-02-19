@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 import time
 import math
 from typing import Tuple, Optional
@@ -47,7 +48,8 @@ class ArmController:
     MAX_RECONNECT_ATTEMPTS = 5
     RECONNECT_BASE_DELAY = 0.5
 
-    def __init__(self, port: str = None, baudrate: int = 115200, simulate: bool = False):
+    def __init__(self, port: str = None, baudrate: int = 115200, simulate: bool = False,
+                 serial_lock: Optional[threading.Lock] = None):
         if port is None:
             from .port_config import get_serial_port
             port = get_serial_port("arm")
@@ -55,6 +57,7 @@ class ArmController:
         self.baudrate = baudrate
         self.simulate = simulate or not SERIAL_AVAILABLE
         self._serial: Optional[serial.Serial] = None
+        self._serial_lock = serial_lock or threading.Lock()
         self._state = ArmState.DISCONNECTED
         self._current_position = ArmPosition()
         self._target_position = ArmPosition()
@@ -183,22 +186,23 @@ class ArmController:
             time.sleep(delay)
 
     def _send_command(self, angles: Tuple[float, ...]) -> None:
-        if not self._serial or not self._serial.is_open:
-            if not self.reconnect():
-                return
+        with self._serial_lock:
+            if not self._serial or not self._serial.is_open:
+                if not self.reconnect():
+                    return
 
-        cmd = ",".join(f"{int(a)}" for a in angles) + "\n"
-        try:
-            self._serial.write(cmd.encode())
-            self._serial.flush()
+            cmd = ",".join(f"{int(a)}" for a in angles) + "\n"
+            try:
+                self._serial.write(cmd.encode())
+                self._serial.flush()
 
-            response = self._serial.readline().decode().strip()
-            if response != "OK":
-                logger.warning(f"Unexpected response: {response}")
-        except serial.SerialException as e:
-            logger.error(f"Serial write failed: {e}")
-            self._state = ArmState.ERROR
-            self.reconnect()
+                response = self._serial.readline().decode().strip()
+                if response != "OK":
+                    logger.warning(f"Unexpected response: {response}")
+            except serial.SerialException as e:
+                logger.error(f"Serial write failed: {e}")
+                self._state = ArmState.ERROR
+                self.reconnect()
     
     def set_compliant(self, enabled: bool) -> None:
         """Put arm into compliant (torque-off) mode for kinesthetic teaching."""
@@ -206,16 +210,17 @@ class ArmController:
             logger.info(f"Compliance {'enabled' if enabled else 'disabled'} (simulated)")
             return
 
-        if not self._serial or not self._serial.is_open:
-            return
+        with self._serial_lock:
+            if not self._serial or not self._serial.is_open:
+                return
 
-        try:
-            cmd = f"TORQUE:{'0' if enabled else '1'}\n"
-            self._serial.write(cmd.encode())
-            self._serial.flush()
-            logger.info(f"Compliance {'enabled' if enabled else 'disabled'}")
-        except Exception as e:
-            logger.error(f"Failed to set compliance: {e}")
+            try:
+                cmd = f"TORQUE:{'0' if enabled else '1'}\n"
+                self._serial.write(cmd.encode())
+                self._serial.flush()
+                logger.info(f"Compliance {'enabled' if enabled else 'disabled'}")
+            except Exception as e:
+                logger.error(f"Failed to set compliance: {e}")
 
     def __enter__(self) -> "ArmController":
         self.connect()

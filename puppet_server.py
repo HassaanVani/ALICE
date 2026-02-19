@@ -1,7 +1,8 @@
 import asyncio
 import json
 import logging
-from typing import Optional, Set, Callable, Tuple
+import time
+from typing import Optional, Set
 
 try:
     import websockets
@@ -13,7 +14,8 @@ except ImportError:
 
 from hardware import (ArmController, MagnetDriver, HandToArmMapper,
                       GestureToGripper, TeachingRecorder, MotionPlayer,
-                      create_gripper)
+                      create_gripper, PuppeteerState, ArmFrame)
+from hardware.puppeteer import get_websocket_payload
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -21,6 +23,8 @@ logger = logging.getLogger("PuppetServer")
 
 
 class PuppetServer:
+    """Sole owner of puppeteer mode: state machine, arm control, recording, playback, broadcasting."""
+
     def __init__(self, host: str = "localhost", port: int = 8766, simulate: bool = True,
                  arm: Optional[ArmController] = None,
                  magnet: Optional[MagnetDriver] = None,
@@ -50,15 +54,117 @@ class PuppetServer:
         self._magnet_port: Optional[str] = None
         self._state_manager = None
 
-        # Callback invoked on each hand_position update: (angles, is_pinching) -> None
-        self._on_hand_update: Optional[Callable[[Tuple[float, ...], bool], None]] = None
+        # State machine
+        self._state: PuppeteerState = PuppeteerState.IDLE
+
+        # Reference to TensorStreamServer for activation broadcasting
+        self._tensor_server = None
+
+        # Last ArmFrame for velocity/acceleration tracking
+        self._last_arm_frame: Optional[ArmFrame] = None
+
+    @property
+    def state(self) -> PuppeteerState:
+        return self._state
 
     def set_state_manager(self, state_manager) -> None:
         self._state_manager = state_manager
 
-    def on_hand_update(self, callback: Callable[[Tuple[float, ...], bool], None]) -> None:
-        """Register a callback invoked each time hand data maps to arm angles."""
-        self._on_hand_update = callback
+    def set_tensor_server(self, tensor_server) -> None:
+        """Wire the TensorStreamServer so we can broadcast activations to dashboard clients."""
+        self._tensor_server = tensor_server
+
+    # ── State machine transitions ──────────────────────────────────
+
+    def go_live(self) -> None:
+        """Enter LIVE mode — hand tracking drives the arm."""
+        self._state = PuppeteerState.LIVE
+        self._last_arm_frame = None
+        if self.mapper:
+            self.mapper.reset()
+        self._broadcast_state()
+        logger.info("Puppet state → LIVE")
+
+    def start_recording(self, name: str) -> None:
+        """Enter RECORDING mode — hand tracking drives arm + records frames."""
+        if self.recorder:
+            self.recorder.start_recording(name)
+        self._state = PuppeteerState.RECORDING
+        self._broadcast_state()
+        logger.info(f"Puppet state → RECORDING ({name})")
+
+    def stop_recording(self) -> Optional[object]:
+        """Stop recording, return the captured motion, go to LIVE."""
+        motion = None
+        if self.recorder:
+            motion = self.recorder.stop_recording()
+        self._state = PuppeteerState.LIVE
+        self._broadcast_state()
+        if motion:
+            logger.info(f"Recording complete: {motion.name} ({len(motion.frames)} frames)")
+        return motion
+
+    def start_playback(self, name: str) -> bool:
+        """Enter PLAYBACK mode — replay a recorded motion."""
+        if not self.recorder or not self.player:
+            return False
+        motion = self.recorder.get_motion(name)
+        if not motion:
+            return False
+        if not self.player.play(motion):
+            return False
+        self._state = PuppeteerState.PLAYBACK
+        self._broadcast_state()
+        logger.info(f"Puppet state → PLAYBACK ({name})")
+        return True
+
+    def stop_puppet(self) -> None:
+        """Return to IDLE — stop everything."""
+        if self.player and self.player.is_playing:
+            self.player.stop()
+        if self.recorder and self.recorder.is_recording:
+            self.recorder.stop_recording()
+        self._state = PuppeteerState.IDLE
+        self._last_arm_frame = None
+        self._broadcast_state()
+        logger.info("Puppet state → IDLE")
+
+    # ── Broadcasting ───────────────────────────────────────────────
+
+    def _broadcast_state(self) -> None:
+        """Broadcast current puppet state to all connected puppet clients."""
+        if self._state_manager:
+            self._state_manager.update_puppeteer_state(self._state.value)
+
+        msg = json.dumps({"type": "puppet_state", "state": self._state.value})
+        asyncio.ensure_future(self._broadcast_to_clients(msg))
+
+    async def _broadcast_to_clients(self, message: str) -> None:
+        dead = set()
+        for client in self.clients.copy():
+            try:
+                await client.send(message)
+            except Exception:
+                dead.add(client)
+        for c in dead:
+            self.clients.discard(c)
+
+    async def _broadcast_activations(self, arm_frame: ArmFrame) -> None:
+        """Send neural activation payload to tensor server (dashboard) clients."""
+        if not self._tensor_server or not self._tensor_server.clients:
+            return
+
+        payload = get_websocket_payload(arm_frame)
+        dead = set()
+        for client in self._tensor_server.clients.copy():
+            try:
+                await client.send(payload)
+            except Exception:
+                dead.add(client)
+        for c in dead:
+            self._tensor_server.clients.discard(c)
+
+    # ── Hardware init ──────────────────────────────────────────────
 
     def initialize(self) -> bool:
         try:
@@ -90,16 +196,21 @@ class PuppetServer:
             logger.error(f"Init failed: {e}")
             return False
 
+    # ── WebSocket handler ──────────────────────────────────────────
+
     async def handler(self, websocket: WebSocketServerProtocol) -> None:
         self.clients.add(websocket)
         logger.info(f"Puppet client connected. Total: {len(self.clients)}")
 
         # Send initial state sync
-        if self._state_manager:
-            try:
+        try:
+            await websocket.send(json.dumps({
+                "type": "puppet_state", "state": self._state.value
+            }))
+            if self._state_manager:
                 await websocket.send(self._state_manager.get_state_sync_message())
-            except Exception as e:
-                logger.debug(f"Failed to send initial state sync: {e}")
+        except Exception as e:
+            logger.debug(f"Failed to send initial state sync: {e}")
 
         try:
             async for message in websocket:
@@ -125,13 +236,11 @@ class PuppetServer:
 
             elif msg_type == "start_teaching":
                 name = data.get("name", f"motion_{len(self.recorder.motions)}")
-                self.recorder.start_recording(name)
-                logger.info(f"Teaching started: {name}")
+                self.start_recording(name)
 
             elif msg_type == "stop_teaching":
-                motion = self.recorder.stop_recording()
+                motion = self.stop_recording()
                 if motion:
-                    logger.info(f"Teaching complete: {motion.name} ({len(motion.frames)} frames)")
                     await websocket.send(json.dumps({
                         "type": "teaching_complete",
                         "name": motion.name,
@@ -144,12 +253,14 @@ class PuppetServer:
                 if not name:
                     await self._send_error(websocket, "play_motion requires 'name'")
                     return
-                motion = self.recorder.get_motion(name)
-                if motion:
-                    self.player.play(motion)
-                    logger.info(f"Playing motion: {name}")
-                else:
-                    await self._send_error(websocket, f"Motion '{name}' not found")
+                if not self.start_playback(name):
+                    await self._send_error(websocket, f"Motion '{name}' not found or empty")
+
+            elif msg_type == "stop_playback":
+                if self.player and self.player.is_playing:
+                    self.player.stop()
+                self._state = PuppeteerState.LIVE
+                self._broadcast_state()
 
             elif msg_type == "list_motions":
                 await websocket.send(json.dumps({
@@ -166,6 +277,9 @@ class PuppetServer:
                     self.gripper.set_position(position)
 
             elif msg_type == "get_state":
+                await websocket.send(json.dumps({
+                    "type": "puppet_state", "state": self._state.value
+                }))
                 if self._state_manager:
                     await websocket.send(self._state_manager.get_state_sync_message())
 
@@ -185,7 +299,13 @@ class PuppetServer:
         except Exception as e:
             logger.debug(f"Failed to send error to client: {e}")
 
+    # ── Hand position handling (core of live/recording) ────────────
+
     async def _handle_hand_position(self, data: dict, websocket: WebSocketServerProtocol) -> None:
+        # Ignore hand data when in IDLE or PLAYBACK
+        if self._state in (PuppeteerState.IDLE, PuppeteerState.PLAYBACK):
+            return
+
         pos = data.get("position", {})
         hand_x = pos.get("x", 0.5)
         hand_y = pos.get("y", 0.5)
@@ -209,14 +329,39 @@ class PuppetServer:
         else:
             self.magnet.toggle(is_pinching)
 
-        if self.recorder.is_recording:
+        if self._state == PuppeteerState.RECORDING and self.recorder.is_recording:
             self.recorder.record_frame(hand_x, hand_y, hand_z, is_pinching)
 
-        # Notify the main loop about the new hand-driven arm state
-        if self._on_hand_update:
-            self._on_hand_update(angles, is_pinching)
+        # Build ArmFrame for activation encoding
+        now = time.time()
+        velocities = (0.0,) * 5
+        accelerations = (0.0,) * 5
+        if self._last_arm_frame:
+            dt = now - self._last_arm_frame.timestamp
+            if dt > 0:
+                velocities = tuple(
+                    (a - b) / dt for a, b in zip(angles, self._last_arm_frame.angles)
+                )
+                accelerations = tuple(
+                    (v - pv) / dt for v, pv in zip(velocities, self._last_arm_frame.velocities)
+                )
 
-        # Broadcast arm state to ALL connected clients
+        arm_frame = ArmFrame(
+            timestamp=now,
+            angles=angles,
+            velocities=velocities,
+            accelerations=accelerations,
+        )
+        self._last_arm_frame = arm_frame
+
+        # Update state manager
+        if self._state_manager:
+            self._state_manager.update_arm(tuple(angles), "moving")
+
+        # Broadcast activations to tensor/dashboard clients
+        await self._broadcast_activations(arm_frame)
+
+        # Broadcast arm state to ALL connected puppet clients (throttled)
         self._frame_count += 1
         if self._frame_count % 3 == 0:
             arm_msg = json.dumps({
@@ -224,35 +369,29 @@ class PuppetServer:
                 "angles": list(angles),
                 "gripper": is_pinching
             })
-            dead_clients = set()
-            for client in self.clients.copy():
-                try:
-                    await client.send(arm_msg)
-                except Exception:
-                    dead_clients.add(client)
-            for client in dead_clients:
-                self.clients.discard(client)
+            await self._broadcast_to_clients(arm_msg)
+
+    # ── Background loops ───────────────────────────────────────────
 
     async def _heartbeat_loop(self) -> None:
         """Send heartbeat every 5 seconds."""
         while self._streaming:
             if self.clients and self._state_manager:
                 msg = self._state_manager.heartbeat_message()
-                dead = set()
-                for client in self.clients.copy():
-                    try:
-                        await client.send(msg)
-                    except Exception:
-                        dead.add(client)
-                for c in dead:
-                    self.clients.discard(c)
+                await self._broadcast_to_clients(msg)
             await asyncio.sleep(5)
 
     async def playback_loop(self) -> None:
         while self._streaming:
             if self.player and self.player.is_playing:
-                self.player.update()
+                still_playing = self.player.update()
+                if not still_playing and self._state == PuppeteerState.PLAYBACK:
+                    self._state = PuppeteerState.LIVE
+                    self._broadcast_state()
+                    logger.info("Playback complete → LIVE")
             await asyncio.sleep(0.05)
+
+    # ── Server lifecycle ───────────────────────────────────────────
 
     async def start(self) -> None:
         if not WEBSOCKETS_AVAILABLE:
@@ -279,6 +418,7 @@ class PuppetServer:
 
     async def stop(self) -> None:
         self._streaming = False
+        self.stop_puppet()
 
         if self._server:
             self._server.close()

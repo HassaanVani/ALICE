@@ -70,6 +70,11 @@ export class SceneManager {
     }
 
     disposeScene(sceneData) {
+        // Call scene-level dispose hook if provided (handles InstancedMesh etc.)
+        if (sceneData.dispose) {
+            sceneData.dispose();
+        }
+
         sceneData.scene.traverse((object) => {
             if (object.geometry) object.geometry.dispose();
             if (object.material) {
@@ -79,7 +84,10 @@ export class SceneManager {
                     object.material.dispose();
                 }
             }
+            if (object.dispose) object.dispose();
         });
+
+        sceneData.scene.clear();
     }
 
     zoom(delta) {

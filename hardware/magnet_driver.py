@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from typing import Optional
 from enum import Enum
@@ -18,7 +19,8 @@ class MagnetState(Enum):
 
 
 class MagnetDriver:
-    def __init__(self, port: str = None, pin: int = 13, simulate: bool = False):
+    def __init__(self, port: str = None, pin: int = 13, simulate: bool = False,
+                 serial_lock: Optional[threading.Lock] = None):
         if port is None:
             from .port_config import get_serial_port
             port = get_serial_port("magnet")
@@ -26,6 +28,7 @@ class MagnetDriver:
         self.pin = pin
         self.simulate = simulate or not SERIAL_AVAILABLE
         self._serial: Optional[serial.Serial] = None
+        self._serial_lock = serial_lock or threading.Lock()
         self._state = MagnetState.OFF
         self._shared_serial = None
     
@@ -37,8 +40,11 @@ class MagnetDriver:
     def is_on(self) -> bool:
         return self._state == MagnetState.ON
     
-    def use_shared_serial(self, serial_connection: "serial.Serial") -> None:
+    def use_shared_serial(self, serial_connection: "serial.Serial",
+                         lock: Optional[threading.Lock] = None) -> None:
         self._shared_serial = serial_connection
+        if lock is not None:
+            self._serial_lock = lock
     
     def connect(self) -> bool:
         if self.simulate:
@@ -62,24 +68,25 @@ class MagnetDriver:
     
     def toggle(self, on: bool) -> bool:
         target_state = MagnetState.ON if on else MagnetState.OFF
-        
+
         if self.simulate:
             self._state = target_state
             return True
-        
-        serial_conn = self._shared_serial or self._serial
-        if not serial_conn or not serial_conn.is_open:
-            return False
-        
-        try:
-            cmd = f"MAG:{1 if on else 0}\n"
-            serial_conn.write(cmd.encode())
-            serial_conn.flush()
-            self._state = target_state
-            return True
-        except Exception as e:
-            logger.error(f"Toggle failed: {e}")
-            return False
+
+        with self._serial_lock:
+            serial_conn = self._shared_serial or self._serial
+            if not serial_conn or not serial_conn.is_open:
+                return False
+
+            try:
+                cmd = f"MAG:{1 if on else 0}\n"
+                serial_conn.write(cmd.encode())
+                serial_conn.flush()
+                self._state = target_state
+                return True
+            except Exception as e:
+                logger.error(f"Toggle failed: {e}")
+                return False
     
     def on(self) -> bool:
         return self.toggle(True)

@@ -20,8 +20,10 @@ export class PuppetBridge {
             onArmUpdate: null,
             onError: null,
             onStateSync: null,
-            onHeartbeat: null
+            onHeartbeat: null,
+            onPuppetState: null
         };
+        this.puppetState = 'idle';
         this.lastState = null;
         this.lastHeartbeat = null;
         this.reconnectAttempts = 0;
@@ -87,12 +89,17 @@ export class PuppetBridge {
             const msg = JSON.parse(data);
             if (msg.type === 'arm_position') {
                 this.callbacks.onArmUpdate?.(msg);
+            } else if (msg.type === 'puppet_state') {
+                this.puppetState = msg.state;
+                this.callbacks.onPuppetState?.(msg.state);
             } else if (msg.type === 'state_sync') {
                 this.lastState = msg.state;
                 this.callbacks.onStateSync?.(msg.state);
             } else if (msg.type === 'heartbeat') {
                 this.lastHeartbeat = msg.timestamp;
                 this.callbacks.onHeartbeat?.(msg.timestamp);
+            } else if (msg.type === 'teaching_complete') {
+                this.callbacks.onTeachingComplete?.(msg);
             }
         } catch { /* non-JSON message — ignore */ }
     }
@@ -246,6 +253,16 @@ export class PuppetBridge {
 
     onHeartbeat(callback) {
         this.callbacks.onHeartbeat = callback;
+        return this;
+    }
+
+    onPuppetState(callback) {
+        this.callbacks.onPuppetState = callback;
+        return this;
+    }
+
+    onTeachingComplete(callback) {
+        this.callbacks.onTeachingComplete = callback;
         return this;
     }
 }
