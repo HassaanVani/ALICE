@@ -19,9 +19,11 @@ export class TensorBridge {
         this.frozen = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
+        this._autoReconnect = true;
     }
 
     connect() {
+        this._autoReconnect = true;
         try {
             this.socket = new WebSocket(this.serverUrl);
             this.socket.binaryType = 'arraybuffer';
@@ -51,7 +53,7 @@ export class TensorBridge {
     }
 
     disconnect() {
-        this.maxReconnectAttempts = 0;
+        this._autoReconnect = false;
         if (this.socket) {
             this.socket.close();
             this.socket = null;
@@ -60,9 +62,14 @@ export class TensorBridge {
     }
 
     _attemptReconnect() {
+        if (!this._autoReconnect) return;
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
-            setTimeout(() => this.connect(), 2000);
+            setTimeout(() => {
+                if (!this.connected && this._autoReconnect) {
+                    this.connect();
+                }
+            }, 2000 * this.reconnectAttempts);
         }
     }
 

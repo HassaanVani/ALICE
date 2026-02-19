@@ -10,7 +10,7 @@
 ## P1 — High (broken features, resource waste, silent failures)
 
 - [ ] **Dashboard opens 3 duplicate WebSocket connections** — `useAliceState`, `useTensorStream`, `useCameraStream` each independently connect to the same `TENSOR_WS_URL`. Should consolidate into a single shared WebSocket provider/context. (`dashboard/src/hooks/`)
-- [ ] **Tensor bridge reconnect permanently broken** — `tensor-bridge.js` sets `maxReconnectAttempts = 0` on disconnect (destructive). Unlike puppet-bridge which uses `_autoReconnect` flag, tensor bridge can never reconnect after intentional disconnect. (`Haptix/src/tensor-bridge.js`)
+- [x] **Tensor bridge reconnect permanently broken** — Replaced destructive `maxReconnectAttempts = 0` with `_autoReconnect` flag (matching puppet-bridge pattern). Added exponential backoff and guard in reconnect timer. (`Haptix/src/tensor-bridge.js`)
 - [ ] **Gripper errors silently swallowed** — `_sort_loop` and `_rebellion_loop` call `gripper.close()`/`gripper.open()` with no error checking. If gripper fails mid-sort, robot continues with no block. (`main.py`)
 - [ ] **Blocking Gemini API in narration** — `narration.py` calls Gemini API via `asyncio.to_thread()` with no timeout. If API hangs, narration loop stalls indefinitely. (`narration.py`)
 - [ ] **No back-pressure on WebSocket broadcasts** — `server.py` broadcasts tensor frames at full rate with no per-client queuing. Slow dashboard client causes server memory buildup. (`server.py`)
