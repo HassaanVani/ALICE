@@ -1,9 +1,10 @@
 import asyncio
 import argparse
 import logging
+import time as _time
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from config import load_config, AliceConfig
 from selftest import SelfTest
@@ -71,13 +72,16 @@ class ALICE:
         # Recording
         self.recorder = SessionRecorder(config.recording.output_dir)
 
-        # Puppet server
+        # Puppet server — hardware injected later in initialize()
         self.puppet_server = PuppetServer(
             host=config.websocket.puppet_host if hasattr(config.websocket, 'puppet_host') else "localhost",
             port=config.websocket.puppet_port,
             simulate=config.simulate,
         )
         self.puppet_server.set_state_manager(self.state_manager)
+
+        # Queue for hand data from PuppetServer → _run_puppeteer loop
+        self._hand_data_queue: asyncio.Queue[Tuple[tuple, bool]] = asyncio.Queue(maxsize=5)
 
         # Audience
         self.audience_server = AudienceServer(
@@ -156,6 +160,28 @@ class ALICE:
                 lambda: self.cameras.get_frame(CameraRole.OVERHEAD)
             )
             self._ws_server.set_recorder(self.recorder)
+
+            # Inject shared hardware into PuppetServer so it drives the same arm
+            self.puppet_server.arm = self.arm
+            self.puppet_server.magnet = self.magnet
+            self.puppet_server.gripper = self.gripper
+            self.puppet_server._owns_hardware = False
+
+            # Wire hand-update callback: PuppetServer → _run_puppeteer loop
+            def _on_hand_update(angles: tuple, is_pinching: bool) -> None:
+                try:
+                    self._hand_data_queue.put_nowait((angles, is_pinching))
+                except asyncio.QueueFull:
+                    # Drop oldest, keep latest
+                    try:
+                        self._hand_data_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                    try:
+                        self._hand_data_queue.put_nowait((angles, is_pinching))
+                    except asyncio.QueueFull:
+                        pass
+            self.puppet_server.on_hand_update(_on_hand_update)
 
             # Load RL agent if available
             self._load_rl_agent()
@@ -650,8 +676,23 @@ class ALICE:
         cv2.destroyAllWindows()
 
     async def _run_puppeteer(self) -> None:
-        logger.info("Puppeteer mode - 'l' for live, 'r' to record, 'p' to playback, 'k' for kinesthetic, 'q' to quit")
+        """Puppeteer mode — Haptix hand-tracking drives the arm (IMU as fallback).
+
+        Data flow:
+          Haptix HandTracker → PuppetBridge (WS) → PuppetServer._handle_hand_position
+            → HandToArmMapper → arm.move_to()  (already done in PuppetServer)
+            → on_hand_update callback → _hand_data_queue → this loop
+            → state broadcast + puppeteer activation broadcast
+
+        The IMU-based PuppeteerController is kept as a fallback for when
+        physical IMU hardware is connected and no Haptix client is streaming.
+        """
+        logger.info("Puppeteer mode — hand tracking active (Haptix WS or IMU fallback)")
+        logger.info("  Keys: 'l' live (IMU), 'r' record, 'p' playback, 'k' kinesthetic, 'q' quit")
         current_mode = self.mode
+        self.state_manager.update_puppeteer_state("live")
+        last_hand_time = 0.0
+        HAND_TIMEOUT = 1.0  # seconds before falling back to IMU
 
         while self._running and self.mode == current_mode:
             key_pressed = None
@@ -671,7 +712,7 @@ class ALICE:
                 if self.puppeteer.state == PuppeteerState.IDLE:
                     self.puppeteer.start_live()
                     self.state_manager.update_puppeteer_state("live")
-                    logger.info("LIVE mode - Your arm controls the robot!")
+                    logger.info("LIVE mode (IMU) — Your arm controls the robot!")
                 else:
                     self.puppeteer.stop()
                     self.state_manager.update_puppeteer_state("idle")
@@ -680,7 +721,7 @@ class ALICE:
                 if self.puppeteer.state == PuppeteerState.IDLE:
                     self.puppeteer.start_recording()
                     self.state_manager.update_puppeteer_state("recording")
-                    logger.info("RECORDING - Move your arm...")
+                    logger.info("RECORDING — Move your arm...")
                 elif self.puppeteer.state == PuppeteerState.RECORDING:
                     recording = self.puppeteer.stop_recording()
                     self.state_manager.update_puppeteer_state("idle")
@@ -689,31 +730,56 @@ class ALICE:
                 if self.puppeteer.recording:
                     self.puppeteer.start_playback()
                     self.state_manager.update_puppeteer_state("playback")
-                    logger.info("PLAYBACK - Replaying recording...")
+                    logger.info("PLAYBACK — Replaying recording...")
             elif key_pressed == 'k':
                 if not self.kinesthetic.is_recording:
-                    self.kinesthetic.start("kinesthetic_" + str(int(__import__('time').time())))
-                    logger.info("KINESTHETIC TEACHING - Move the arm by hand...")
+                    self.kinesthetic.start("kinesthetic_" + str(int(_time.time())))
+                    logger.info("KINESTHETIC TEACHING — Move the arm by hand...")
                 else:
                     motion = self.kinesthetic.stop()
                     if motion:
                         logger.info(f"Kinesthetic recording: {len(motion.frames)} frames")
 
-            if self.puppeteer.state != PuppeteerState.IDLE:
-                frame = self.puppeteer.update()
-                if frame:
-                    await self._broadcast_puppeteer_activations(frame)
-                    self.state_manager.update_arm(
-                        tuple(frame.angles),
-                        "moving"
+            # ── Primary: consume hand data from Haptix via PuppetServer ──
+            hand_data_received = False
+            while not self._hand_data_queue.empty():
+                try:
+                    angles, is_pinching = self._hand_data_queue.get_nowait()
+                    hand_data_received = True
+                    last_hand_time = _time.time()
+
+                    # arm.move_to already called by PuppetServer, just broadcast state
+                    self.state_manager.update_arm(tuple(angles), "moving")
+                    self.state_manager.update_puppeteer_state("live")
+
+                    # Broadcast as neural activations to the tensor stream
+                    from hardware.puppeteer import ArmFrame
+                    frame = ArmFrame(
+                        timestamp=_time.time(),
+                        angles=tuple(angles),
                     )
+                    await self._broadcast_puppeteer_activations(frame)
+                except asyncio.QueueEmpty:
+                    break
+
+            # ── Fallback: IMU-based PuppeteerController when no hand data ──
+            if not hand_data_received and (_time.time() - last_hand_time) > HAND_TIMEOUT:
+                if self.puppeteer.state != PuppeteerState.IDLE:
+                    frame = self.puppeteer.update()
+                    if frame:
+                        await self._broadcast_puppeteer_activations(frame)
+                        self.state_manager.update_arm(
+                            tuple(frame.angles),
+                            "moving"
+                        )
 
             if self.kinesthetic.is_recording:
                 self.kinesthetic.update()
 
             await asyncio.sleep(0.033)
 
-        self.puppeteer.stop()
+        if self.puppeteer:
+            self.puppeteer.stop()
 
     async def _broadcast_puppeteer_activations(self, frame) -> None:
         if not self._ws_server.clients:

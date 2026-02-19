@@ -44,8 +44,9 @@ const styles = {
   },
 };
 
-export default function ModeControls({ currentMode, sendCommand }) {
+export default function ModeControls({ currentMode, sendCommand, updateState }) {
   const handleSwitch = (modeId) => {
+    if (updateState) updateState({ mode: modeId });
     sendCommand('switch_mode', { mode: modeId });
   };
 

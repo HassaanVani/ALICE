@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import CameraPanel from './components/CameraPanel.jsx';
 import BlockOverlay from './components/BlockOverlay.jsx';
+import ArmOverlay from './components/ArmOverlay.jsx';
 import ActivationPanel from './components/ActivationPanel.jsx';
 import BrainViewport from './components/BrainViewport.jsx';
-import ArmStatus from './components/ArmStatus.jsx';
+import SimulatedArm from './components/SimulatedArm/SimulatedArm.jsx';
 import SystemState from './components/SystemState.jsx';
 import ModeControls from './components/ModeControls.jsx';
 import RecordingControls from './components/RecordingControls.jsx';
@@ -17,9 +18,12 @@ function getRoute() {
 }
 
 function Dashboard() {
-  const { state, connected, sendCommand } = useAliceState();
+  const { state, connected, sendCommand, updateState } = useAliceState();
   const { activations } = useTensorStream();
   const { frameRef, cameraConnected } = useCameraStream();
+
+  const armAngles = state.arm_position || [90, 90, 90, 90, 90];
+  const gripperOpen = !(state.gripper_position > 0.5);
 
   return (
     <div className="dashboard">
@@ -27,9 +31,32 @@ function Dashboard() {
       <div className="dashboard-header">
         <h1>ALICE Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 11, color: '#a1a1aa', fontFamily: 'var(--font-mono)' }}>
-            {state.mode || 'IDLE'}
-          </span>
+          <select
+            value={state.mode || 'idle'}
+            onChange={(e) => {
+              const mode = e.target.value;
+              updateState({ mode });
+              sendCommand('switch_mode', { mode });
+            }}
+            style={{
+              background: '#18181b',
+              color: '#e4e4e7',
+              border: '1px solid #3b82f6',
+              borderRadius: 4,
+              padding: '4px 8px',
+              fontSize: 11,
+              fontFamily: 'var(--font-mono)',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="idle">Idle</option>
+            <option value="auto_sort">Auto Sort</option>
+            <option value="auto_tetris">Auto Tetris</option>
+            <option value="puppeteer">Puppeteer</option>
+            <option value="demo">Demo</option>
+            <option value="calibrate">Calibrate</option>
+          </select>
           <div className={`status-dot ${connected ? '' : 'disconnected'}`} />
         </div>
       </div>
@@ -43,6 +70,7 @@ function Dashboard() {
         <div className="panel-body" style={{ padding: 0, position: 'relative' }}>
           <CameraPanel frameRef={frameRef} />
           <BlockOverlay blocks={state.blocks || []} />
+          <ArmOverlay angles={armAngles} gripperOpen={gripperOpen} />
         </div>
       </div>
 
@@ -68,16 +96,16 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* Arm Status */}
+      {/* Simulated Arm */}
       <div className="panel panel-arm">
         <div className="panel-header">
-          <h2>Arm Status</h2>
+          <h2>Simulated Arm</h2>
           <span style={{ fontSize: 10, color: '#52525b' }}>
-            {(state.joints || []).length} joints
+            {armAngles.length} axes
           </span>
         </div>
         <div className="panel-body" style={{ padding: 0 }}>
-          <ArmStatus joints={state.joints || []} gripperOpen={state.gripperOpen ?? true} />
+          <SimulatedArm angles={armAngles} gripperOpen={gripperOpen} />
         </div>
       </div>
 
@@ -96,7 +124,7 @@ function Dashboard() {
             <h2>Mode Controls</h2>
           </div>
           <div className="panel-body">
-            <ModeControls currentMode={state.mode} sendCommand={sendCommand} />
+            <ModeControls currentMode={state.mode} sendCommand={sendCommand} updateState={updateState} />
           </div>
         </div>
       </div>

@@ -17,6 +17,8 @@ class App {
         this.puppetBridge = null;
         this.puppetModeActive = false;
         this.registry = new SceneRegistry();
+        this.roboticArmScene = null;
+        this._previousScene = null;
     }
 
     async init() {
@@ -37,6 +39,12 @@ class App {
                 this.sceneManager.registerScene(scene.id, (THREE) => {
                     this.glassBrainScene = scene.factory(THREE, this.tensorBridge);
                     return this.glassBrainScene;
+                }, scene.metadata);
+            } else if (scene.id === 'robotic-arm') {
+                // Capture arm scene instance for live updates
+                this.sceneManager.registerScene(scene.id, (THREE) => {
+                    this.roboticArmScene = scene.factory(THREE);
+                    return this.roboticArmScene;
                 }, scene.metadata);
             } else {
                 this.sceneManager.registerScene(scene.id, scene.factory, scene.metadata);
@@ -104,6 +112,9 @@ class App {
         this.puppetBridge
             .onConnect(() => console.log('Puppet connected'))
             .onArmUpdate((data) => {
+                if (this.puppetModeActive && this.roboticArmScene) {
+                    this.roboticArmScene.setArmAngles(data.angles, data.gripper);
+                }
                 if (this.puppetModeActive) {
                     document.getElementById('gesture-text').textContent =
                         `Arm: [${data.angles.map(a => a.toFixed(0)).join(', ')}]`;
@@ -281,10 +292,29 @@ class App {
                     this.puppetBridge.connect();
                     this.puppetBridge.startStreaming();
                     document.getElementById('gesture-text').textContent = 'PUPPET MODE';
+
+                    // Auto-switch to robotic arm scene
+                    this._previousScene = this.currentScene;
+                    if (this.currentScene !== 'robotic-arm') {
+                        this.currentScene = 'robotic-arm';
+                        this.sceneManager.switchScene('robotic-arm');
+                        const label = document.getElementById('current-scene-label');
+                        if (label) label.textContent = 'Robotic Arm';
+                    }
                 } else {
                     this.puppetBridge.stopStreaming();
                     this.puppetBridge.disconnect();
                     document.getElementById('gesture-text').textContent = 'Tracking';
+
+                    // Restore previous scene
+                    if (this._previousScene && this._previousScene !== 'robotic-arm') {
+                        this.currentScene = this._previousScene;
+                        this.sceneManager.switchScene(this._previousScene);
+                        const label = document.getElementById('current-scene-label');
+                        const entry = this.registry.get(this._previousScene);
+                        if (label && entry) label.textContent = entry.metadata.name;
+                    }
+                    this._previousScene = null;
                 }
             }
 

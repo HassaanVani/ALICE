@@ -183,11 +183,11 @@ class TensorStreamServer:
 
             await asyncio.sleep(interval)
 
-    async def _heartbeat_loop(self) -> None:
-        """Send heartbeat every 5 seconds to all connected clients."""
+    async def _state_broadcast_loop(self) -> None:
+        """Broadcast full state to all dashboard clients at ~2fps."""
         while self._streaming:
             if self.clients and self._state_manager:
-                msg = self._state_manager.heartbeat_message()
+                msg = self._state_manager.get_state_sync_message()
                 dead = set()
                 for client in self.clients.copy():
                     try:
@@ -196,7 +196,7 @@ class TensorStreamServer:
                         dead.add(client)
                 for c in dead:
                     self.clients.discard(c)
-            await asyncio.sleep(5)
+            await asyncio.sleep(0.5)
 
     async def _camera_stream_loop(self) -> None:
         """Stream JPEG frames at 15fps to requesting clients."""
@@ -236,7 +236,7 @@ class TensorStreamServer:
         tasks = [
             self._server.wait_closed(),
             self.stream_loop(),
-            self._heartbeat_loop(),
+            self._state_broadcast_loop(),
             self._camera_stream_loop(),
         ]
         await asyncio.gather(*tasks)

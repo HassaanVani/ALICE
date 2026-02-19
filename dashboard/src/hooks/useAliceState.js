@@ -53,15 +53,13 @@ export function useAliceState() {
           const msg = JSON.parse(event.data);
 
           if (msg.type === 'state_sync' && msg.state) {
-            // Server sends { type: "state_sync", state: { mode, arm_position, ... } }
-            setState((prev) => ({ ...prev, ...msg.state }));
+            setState((prev) => ({ ...prev, ...msg.state, lastHeartbeat: Date.now() }));
           } else if (msg.type === 'heartbeat') {
-            setState((prev) => ({
-              ...prev,
-              lastHeartbeat: Date.now(),
-            }));
+            setState((prev) => ({ ...prev, lastHeartbeat: Date.now() }));
           } else if (msg.type === 'mode_switched') {
             setState((prev) => ({ ...prev, mode: msg.mode }));
+          } else if (msg.type === 'error') {
+            console.error('[ALICE]', msg.detail || 'Unknown error');
           }
         } catch {
           // Ignore parse errors for non-JSON messages
@@ -95,5 +93,9 @@ export function useAliceState() {
     }
   }, []);
 
-  return { state, connected, sendCommand };
+  const updateState = useCallback((patch) => {
+    setState((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  return { state, connected, sendCommand, updateState };
 }

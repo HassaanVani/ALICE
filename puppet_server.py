@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import Optional, Set
+from typing import Optional, Set, Callable, Tuple
 
 try:
     import websockets
@@ -9,6 +9,7 @@ try:
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
+    WebSocketServerProtocol = object  # fallback for type hints
 
 from hardware import (ArmController, MagnetDriver, HandToArmMapper,
                       GestureToGripper, TeachingRecorder, MotionPlayer,
@@ -20,14 +21,20 @@ logger = logging.getLogger("PuppetServer")
 
 
 class PuppetServer:
-    def __init__(self, host: str = "localhost", port: int = 8766, simulate: bool = True):
+    def __init__(self, host: str = "localhost", port: int = 8766, simulate: bool = True,
+                 arm: Optional[ArmController] = None,
+                 magnet: Optional[MagnetDriver] = None,
+                 gripper=None):
         self.host = host
         self.port = port
         self.simulate = simulate
 
-        self.arm: Optional[ArmController] = None
-        self.magnet: Optional[MagnetDriver] = None
-        self.gripper = None
+        # Use externally-provided hardware if given, otherwise create in initialize()
+        self.arm: Optional[ArmController] = arm
+        self.magnet: Optional[MagnetDriver] = magnet
+        self.gripper = gripper
+        self._owns_hardware = arm is None  # only disconnect what we created
+
         self.mapper: Optional[HandToArmMapper] = None
         self.gesture: Optional[GestureToGripper] = None
         self.recorder: Optional[TeachingRecorder] = None
@@ -43,27 +50,41 @@ class PuppetServer:
         self._magnet_port: Optional[str] = None
         self._state_manager = None
 
+        # Callback invoked on each hand_position update: (angles, is_pinching) -> None
+        self._on_hand_update: Optional[Callable[[Tuple[float, ...], bool], None]] = None
+
     def set_state_manager(self, state_manager) -> None:
         self._state_manager = state_manager
 
+    def on_hand_update(self, callback: Callable[[Tuple[float, ...], bool], None]) -> None:
+        """Register a callback invoked each time hand data maps to arm angles."""
+        self._on_hand_update = callback
+
     def initialize(self) -> bool:
         try:
-            arm_kwargs = {"simulate": self.simulate}
-            magnet_kwargs = {"simulate": self.simulate}
-            if self._arm_port:
-                arm_kwargs["port"] = self._arm_port
-            if self._magnet_port:
-                magnet_kwargs["port"] = self._magnet_port
-            self.arm = ArmController(**arm_kwargs)
-            self.magnet = MagnetDriver(**magnet_kwargs)
-            self.gripper = create_gripper("magnet", self.magnet)
+            # Only create hardware if not externally provided
+            if self.arm is None:
+                arm_kwargs = {"simulate": self.simulate}
+                if self._arm_port:
+                    arm_kwargs["port"] = self._arm_port
+                self.arm = ArmController(**arm_kwargs)
+                self.arm.connect()
+
+            if self.magnet is None:
+                magnet_kwargs = {"simulate": self.simulate}
+                if self._magnet_port:
+                    magnet_kwargs["port"] = self._magnet_port
+                self.magnet = MagnetDriver(**magnet_kwargs)
+
+            if self.gripper is None:
+                self.gripper = create_gripper("magnet", self.magnet)
+
             self.mapper = HandToArmMapper()
             self.gesture = GestureToGripper()
             self.recorder = TeachingRecorder(self.mapper)
             self.player = MotionPlayer(self.arm, self.magnet)
 
-            self.arm.connect()
-            logger.info("Hardware initialized")
+            logger.info("Puppet server hardware initialized")
             return True
         except Exception as e:
             logger.error(f"Init failed: {e}")
@@ -191,13 +212,26 @@ class PuppetServer:
         if self.recorder.is_recording:
             self.recorder.record_frame(hand_x, hand_y, hand_z, is_pinching)
 
+        # Notify the main loop about the new hand-driven arm state
+        if self._on_hand_update:
+            self._on_hand_update(angles, is_pinching)
+
+        # Broadcast arm state to ALL connected clients
         self._frame_count += 1
-        if self._frame_count % 10 == 0:
-            await websocket.send(json.dumps({
+        if self._frame_count % 3 == 0:
+            arm_msg = json.dumps({
                 "type": "arm_position",
                 "angles": list(angles),
                 "gripper": is_pinching
-            }))
+            })
+            dead_clients = set()
+            for client in self.clients.copy():
+                try:
+                    await client.send(arm_msg)
+                except Exception:
+                    dead_clients.add(client)
+            for client in dead_clients:
+                self.clients.discard(client)
 
     async def _heartbeat_loop(self) -> None:
         """Send heartbeat every 5 seconds."""
@@ -250,11 +284,12 @@ class PuppetServer:
             self._server.close()
             await self._server.wait_closed()
 
-        if self.arm:
+        # Only disconnect hardware we created ourselves
+        if self._owns_hardware and self.arm:
             self.arm.home()
             self.arm.disconnect()
 
-        logger.info("Server stopped")
+        logger.info("Puppet server stopped")
 
 
 async def main():
