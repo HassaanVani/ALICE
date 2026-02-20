@@ -37,6 +37,7 @@ export default function Audience() {
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
   const reactionIdRef = useRef(0);
+  const reactionTimers = useRef([]);
 
   // ── WebSocket ───────────────────────────────────────────────
 
@@ -130,6 +131,8 @@ export default function Audience() {
     connect();
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      reactionTimers.current.forEach(t => clearTimeout(t));
+      reactionTimers.current = [];
       if (wsRef.current) wsRef.current.close();
     };
   }, [connect]);
@@ -157,9 +160,11 @@ export default function Audience() {
     const id = reactionIdRef.current++;
     const x = 20 + Math.random() * 60; // 20-80% of screen width
     setFloatingReactions(prev => [...prev.slice(-20), { id, emoji, x }]);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       setFloatingReactions(prev => prev.filter(r => r.id !== id));
+      reactionTimers.current = reactionTimers.current.filter(t => t !== timer);
     }, 2000);
+    reactionTimers.current.push(timer);
   };
 
   // ── Device tilt ─────────────────────────────────────────────

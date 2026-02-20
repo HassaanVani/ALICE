@@ -21,17 +21,6 @@ const styles = {
     fontFamily: 'var(--font-mono)',
     textAlign: 'center',
   },
-  fpsOverlay: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    background: 'rgba(0,0,0,0.7)',
-    color: '#22c55e',
-    padding: '2px 6px',
-    borderRadius: 3,
-    fontSize: 10,
-    fontFamily: 'var(--font-mono)',
-  },
 };
 
 export default function CameraPanel({ frameRef }) {
@@ -39,7 +28,6 @@ export default function CameraPanel({ frameRef }) {
   const imgRef = useRef(new Image());
   const rafRef = useRef(null);
   const lastUrlRef = useRef(null);
-  const fpsRef = useRef({ count: 0, last: performance.now(), display: 0 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -57,15 +45,6 @@ export default function CameraPanel({ frameRef }) {
           canvas.width = img.naturalWidth || 640;
           canvas.height = img.naturalHeight || 480;
           ctx.drawImage(img, 0, 0);
-
-          // FPS counter
-          fpsRef.current.count++;
-          const now = performance.now();
-          if (now - fpsRef.current.last >= 1000) {
-            fpsRef.current.display = fpsRef.current.count;
-            fpsRef.current.count = 0;
-            fpsRef.current.last = now;
-          }
         };
         img.src = url;
       }

@@ -7,7 +7,11 @@ __pycache__/
 calibration_data.json
 node_modules/
 venv/
+.venv/
 .logs/
 .pids/
 recordings/
 dist/
+.DS_Store
+.python-version
+*.egg-info/

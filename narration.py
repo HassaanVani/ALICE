@@ -99,7 +99,7 @@ class NarrationService:
     def _build_prompt(self, state) -> Optional[str]:
         """Build a mode-specific prompt from current state."""
         from narration_prompts import (
-            chimp_sort_prompt, tetris_prompt, puppeteer_prompt,
+            chimp_sort_prompt, puppeteer_prompt,
             calibration_prompt, mode_switch_prompt, rebellion_prompt,
             awaiting_puppeteer_prompt, auto_sort_prompt, auto_tetris_prompt
         )

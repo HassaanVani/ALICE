@@ -12,7 +12,7 @@ from state import AliceStateManager
 from recording import SessionRecorder, SessionPlayer
 from hardware import (ArmController, MagnetDriver, CalibrationManager,
                       create_gripper, KinestheticTeacher)
-from vision import (CameraManager, CameraConfig, CameraRole, CameraHealth,
+from vision import (CameraManager, CameraConfig, CameraRole,
                     ArucoDetector, BlockTracker)
 from brain import InferencePipeline
 from logic import ChimpSortFSM, SortState, TetrisAgent, TetrisController
@@ -358,8 +358,6 @@ class ALICE:
         """Create a TetrisController from config."""
         from vision.screen_reader import ScreenReader, ScreenRegion
         from hardware.keyboard_player import KeyboardPlayer
-        from pathlib import Path
-
         ts = self.config.tetris_screen
         region = ScreenRegion(
             left=ts.board_left, top=ts.board_top,
