@@ -237,6 +237,21 @@ class App {
             const file = e.target.files?.[0];
             if (!file) return;
 
+            // Validate file type and size
+            const ALLOWED_TYPES = ['.glb', '.gltf', '.obj', '.fbx', '.stl'];
+            const MAX_SIZE_MB = 50;
+            const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+            if (!ALLOWED_TYPES.includes(ext)) {
+                alert(`Unsupported file type: ${ext}\nAllowed: ${ALLOWED_TYPES.join(', ')}`);
+                fileInput.value = '';
+                return;
+            }
+            if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+                alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max: ${MAX_SIZE_MB} MB`);
+                fileInput.value = '';
+                return;
+            }
+
             const url = URL.createObjectURL(file);
             const { createCustomModelScene } = await import('./scenes/custom-model.js');
 
@@ -286,9 +301,13 @@ class App {
         let keys = {};
         let prevKeys = {};
 
-        window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
-        window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+        // Store bound handlers for cleanup
+        this._onKeyDown = (e) => { keys[e.key.toLowerCase()] = true; };
+        this._onKeyUp = (e) => { keys[e.key.toLowerCase()] = false; };
+        window.addEventListener('keydown', this._onKeyDown);
+        window.addEventListener('keyup', this._onKeyUp);
 
+        this._rafId = null;
         const tick = () => {
             if (keys['arrowup'] || keys['w']) this.sceneManager.zoom(0.5);
             if (keys['arrowdown'] || keys['s']) this.sceneManager.zoom(-0.5);
@@ -345,9 +364,20 @@ class App {
             }
 
             prevKeys = { ...keys };
-            requestAnimationFrame(tick);
+            this._rafId = requestAnimationFrame(tick);
         };
-        tick();
+        this._rafId = requestAnimationFrame(tick);
+    }
+
+    destroy() {
+        // Clean up keyboard listeners
+        if (this._onKeyDown) window.removeEventListener('keydown', this._onKeyDown);
+        if (this._onKeyUp) window.removeEventListener('keyup', this._onKeyUp);
+        // Cancel animation frame loop
+        if (this._rafId != null) cancelAnimationFrame(this._rafId);
+        // Disconnect bridges
+        if (this.tensorBridge) this.tensorBridge.disconnect();
+        if (this.puppetBridge) this.puppetBridge.disconnect();
     }
 }
 

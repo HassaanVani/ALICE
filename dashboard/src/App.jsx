@@ -9,6 +9,7 @@ import SystemState from './components/SystemState.jsx';
 import ModeControls from './components/ModeControls.jsx';
 import RecordingControls from './components/RecordingControls.jsx';
 import Audience from './pages/Audience.jsx';
+import { AliceSocketProvider } from './hooks/AliceSocketProvider.jsx';
 import { useAliceState } from './hooks/useAliceState.js';
 import { useTensorStream } from './hooks/useTensorStream.js';
 import { useCameraStream } from './hooks/useCameraStream.js';
@@ -27,6 +28,20 @@ function Dashboard() {
 
   return (
     <div className="dashboard">
+      {/* Connection warning banner */}
+      {!connected && (
+        <div style={{
+          background: '#7f1d1d',
+          color: '#fca5a5',
+          padding: '6px 16px',
+          fontSize: 11,
+          fontFamily: 'var(--font-mono)',
+          textAlign: 'center',
+          borderBottom: '1px solid #991b1b',
+        }}>
+          Disconnected from ALICE — data may be stale. Reconnecting...
+        </div>
+      )}
       {/* Header */}
       <div className="dashboard-header">
         <h1>ALICE Dashboard</h1>
@@ -150,5 +165,9 @@ export default function App() {
     return <Audience />;
   }
 
-  return <Dashboard />;
+  return (
+    <AliceSocketProvider>
+      <Dashboard />
+    </AliceSocketProvider>
+  );
 }

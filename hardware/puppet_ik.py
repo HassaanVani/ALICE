@@ -1,9 +1,9 @@
 import logging
 import math
-
-logger = logging.getLogger("PuppetIK")
 import time
 import json
+
+logger = logging.getLogger("PuppetIK")
 from typing import Tuple, Optional, List, Callable
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -241,7 +241,7 @@ class TeachingRecorder:
             return None
 
         if len(self._current_motion.frames) >= self.max_frames:
-            logging.getLogger("TeachingRecorder").warning(
+            logger.warning(
                 f"Max frames ({self.max_frames}) reached, stopping recording"
             )
             self.stop_recording()
@@ -373,7 +373,9 @@ class MotionPlayer:
             self.magnet.toggle(frame.gripper_state)
             self._playing = False
             if self._on_complete:
-                self._on_complete()
+                cb = self._on_complete
+                self._on_complete = None  # release reference to prevent retention
+                cb()
             return False
 
         frame = frames[frame_index]

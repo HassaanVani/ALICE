@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import threading
 import time
@@ -140,29 +139,6 @@ class ArmController:
         self._state = ArmState.IDLE
         return True
     
-    async def move_to_async(self, angles: Tuple[float, ...], speed: float = 1.0) -> bool:
-        if self._state == ArmState.DISCONNECTED:
-            return False
-
-        if len(angles) != self.AXIS_COUNT:
-            raise ValueError(f"Expected {self.AXIS_COUNT} angles, got {len(angles)}")
-
-        clamped = tuple(
-            max(self.ANGLE_MIN, min(self.ANGLE_MAX, a)) for a in angles
-        )
-        self._target_position = ArmPosition.from_tuple(clamped)
-        self._state = ArmState.MOVING
-
-        if self.simulate:
-            self._current_position = self._target_position
-        else:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self._send_command, clamped)
-
-        self._current_position = self._target_position
-        self._state = ArmState.IDLE
-        return True
-
     def move_axis(self, axis: int, angle: float) -> bool:
         if axis < 0 or axis >= self.AXIS_COUNT:
             raise ValueError(f"Invalid axis: {axis}")

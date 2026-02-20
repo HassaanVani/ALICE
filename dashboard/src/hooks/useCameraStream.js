@@ -1,78 +1,48 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { TENSOR_WS_URL } from '../ws-config.js';
+import { useState, useEffect, useRef } from 'react';
+import { useAliceSocket } from './AliceSocketProvider.jsx';
 
 export function useCameraStream() {
+  const { connected, send, addTextListener, removeTextListener } = useAliceSocket();
   const [cameraConnected, setCameraConnected] = useState(false);
-  const frameRef = useRef(null); // Holds the latest ImageBitmap or Blob URL
-  const wsRef = useRef(null);
-  const reconnectTimer = useRef(null);
+  const frameRef = useRef(null);
 
-  const connect = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+  // Request camera stream once connected
+  useEffect(() => {
+    if (connected) {
+      send(JSON.stringify({ command: 'stream_camera' }));
+      setCameraConnected(true);
+    } else {
+      setCameraConnected(false);
+    }
+  }, [connected, send]);
 
-    try {
-      const ws = new WebSocket(TENSOR_WS_URL);
-      ws.binaryType = 'blob';
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setCameraConnected(true);
-        // Request camera stream from server (server expects "command" field)
-        ws.send(JSON.stringify({ command: 'stream_camera' }));
-      };
-
-      ws.onmessage = (event) => {
-        if (event.data instanceof Blob) {
-          // Revoke previous URL to prevent memory leak
+  useEffect(() => {
+    const handler = (raw) => {
+      try {
+        const msg = JSON.parse(raw);
+        if (msg.type === 'camera_frame' && (msg.jpeg_b64 || msg.data)) {
           if (frameRef.current) {
             URL.revokeObjectURL(frameRef.current);
           }
-          frameRef.current = URL.createObjectURL(event.data);
-        } else if (typeof event.data === 'string') {
-          // Handle JSON messages (e.g., camera frame as base64)
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.type === 'camera_frame' && (msg.jpeg_b64 || msg.data)) {
-              if (frameRef.current) {
-                URL.revokeObjectURL(frameRef.current);
-              }
-              // Convert base64 JPEG to blob URL
-              const binary = atob(msg.jpeg_b64 || msg.data);
-              const array = new Uint8Array(binary.length);
-              for (let i = 0; i < binary.length; i++) {
-                array[i] = binary.charCodeAt(i);
-              }
-              const blob = new Blob([array], { type: 'image/jpeg' });
-              frameRef.current = URL.createObjectURL(blob);
-            }
-          } catch {
-            // Not a camera message
+          const binary = atob(msg.jpeg_b64 || msg.data);
+          const array = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            array[i] = binary.charCodeAt(i);
           }
+          const blob = new Blob([array], { type: 'image/jpeg' });
+          frameRef.current = URL.createObjectURL(blob);
         }
-      };
+      } catch {
+        // Not a camera message
+      }
+    };
 
-      ws.onclose = () => {
-        setCameraConnected(false);
-        wsRef.current = null;
-        reconnectTimer.current = setTimeout(connect, 2000);
-      };
-
-      ws.onerror = () => {
-        ws.close();
-      };
-    } catch (err) {
-      reconnectTimer.current = setTimeout(connect, 2000);
-    }
-  }, []);
-
-  useEffect(() => {
-    connect();
+    addTextListener(handler);
     return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (wsRef.current) wsRef.current.close();
+      removeTextListener(handler);
       if (frameRef.current) URL.revokeObjectURL(frameRef.current);
     };
-  }, [connect]);
+  }, [addTextListener, removeTextListener]);
 
   return { frameRef, cameraConnected };
 }

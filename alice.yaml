@@ -47,6 +47,11 @@ recording:
   enabled: false
   output_dir: recordings
 
+timing:
+  idle_loop_s: 0.1        # idle mode poll interval
+  sort_loop_s: 0.016      # sort/rebellion detection loop (~60fps)
+  camera_poll_s: 0.01     # camera retry when no frame
+
 tetris_screen:
   board_left: 0
   board_top: 0

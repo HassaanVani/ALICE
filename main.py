@@ -304,7 +304,7 @@ class ALICE:
             frame = self.cameras.get_frame(CameraRole.OVERHEAD)
             if frame is not None and not self.inference.is_frozen:
                 self.inference.predict(frame)
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(self.config.timing.idle_loop_s)
 
     # ── Auto Sort (passive attractor) ────────────────────────────────
 
@@ -493,7 +493,7 @@ class ALICE:
         while self._running and self.mode == current_mode:
             frame = self.cameras.get_frame(CameraRole.OVERHEAD)
             if frame is None:
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(self.config.timing.camera_poll_s)
                 continue
 
             blocks = self.detector.detect_blocks(frame)
@@ -544,11 +544,17 @@ class ALICE:
                     })
                     angles = self.calibration.pixel_to_arm(tx, ty)
                     self.arm.move_to(angles)
-                    self.gripper.close()
+                    try:
+                        self.gripper.close()
+                    except Exception as e:
+                        logger.error(f"Gripper close failed: {e}")
                     await asyncio.sleep(0.3)
-                    self.gripper.open()
+                    try:
+                        self.gripper.open()
+                    except Exception as e:
+                        logger.error(f"Gripper open failed: {e}")
 
-            await asyncio.sleep(0.016)
+            await asyncio.sleep(self.config.timing.sort_loop_s)
         return self.sort_fsm.session
 
     async def _rebellion_loop(self, current_mode) -> None:
@@ -556,7 +562,7 @@ class ALICE:
         while self._running and self.mode == current_mode:
             frame = self.cameras.get_frame(CameraRole.OVERHEAD)
             if frame is None:
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(self.config.timing.camera_poll_s)
                 continue
 
             blocks = self.detector.detect_blocks(frame)
@@ -616,41 +622,48 @@ class ALICE:
                 })
                 angles = self.calibration.pixel_to_arm(tx, ty)
                 self.arm.move_to(angles)
-                self.gripper.close()
+                try:
+                    self.gripper.close()
+                except Exception as e:
+                    logger.error(f"Gripper close failed: {e}")
                 await asyncio.sleep(0.3)
-                self.gripper.open()
+                try:
+                    self.gripper.open()
+                except Exception as e:
+                    logger.error(f"Gripper open failed: {e}")
 
-            await asyncio.sleep(0.016)
+            await asyncio.sleep(self.config.timing.sort_loop_s)
 
     async def _run_calibration(self) -> None:
         logger.info("Calibration mode - press 'q' to quit")
         import cv2
         current_mode = self.mode
 
-        while self._running and self.mode == current_mode:
-            frame = self.cameras.get_frame(CameraRole.OVERHEAD)
-            if frame is None:
-                await asyncio.sleep(0.01)
-                continue
+        try:
+            while self._running and self.mode == current_mode:
+                frame = self.cameras.get_frame(CameraRole.OVERHEAD)
+                if frame is None:
+                    await asyncio.sleep(self.config.timing.camera_poll_s)
+                    continue
 
-            blocks = self.detector.detect_blocks(frame)
-            display = self.detector.draw_detections(frame, blocks)
+                blocks = self.detector.detect_blocks(frame)
+                display = self.detector.draw_detections(frame, blocks)
 
-            cv2.imshow("Calibration", display)
-            key = cv2.waitKey(1) & 0xFF
+                cv2.imshow("Calibration", display)
+                key = cv2.waitKey(1) & 0xFF
 
-            if key == ord('q'):
-                break
-            elif key == ord('c') and blocks:
-                block = blocks[0]
-                angles = self.arm.position.as_tuple()
-                self.calibration.add_calibration_point(block.center_x, block.center_y, angles)
-                logger.info(f"Added calibration point: ({block.center_x}, {block.center_y})")
-            elif key == ord('s'):
-                self.calibration.save()
-                logger.info("Calibration saved")
-
-        cv2.destroyAllWindows()
+                if key == ord('q'):
+                    break
+                elif key == ord('c') and blocks:
+                    block = blocks[0]
+                    angles = self.arm.position.as_tuple()
+                    self.calibration.add_calibration_point(block.center_x, block.center_y, angles)
+                    logger.info(f"Added calibration point: ({block.center_x}, {block.center_y})")
+                elif key == ord('s'):
+                    self.calibration.save()
+                    logger.info("Calibration saved")
+        finally:
+            cv2.destroyAllWindows()
 
     async def _run_puppeteer(self) -> None:
         """Puppeteer mode — hand tracking via Haptix.
@@ -662,7 +675,7 @@ class ALICE:
         self.puppet_server.go_live()
         current_mode = self.mode
         while self._running and self.mode == current_mode:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(self.config.timing.idle_loop_s)
         self.puppet_server.stop_puppet()
 
     async def shutdown(self) -> None:

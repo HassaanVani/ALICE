@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { TENSOR_WS_URL } from '../ws-config.js';
+import { useState, useEffect, useCallback } from 'react';
+import { useAliceSocket } from './AliceSocketProvider.jsx';
 
 const DEFAULT_STATE = {
   mode: 'idle',
@@ -24,73 +24,33 @@ const DEFAULT_STATE = {
 };
 
 export function useAliceState() {
+  const { connected, send, addTextListener, removeTextListener } = useAliceSocket();
   const [state, setState] = useState(DEFAULT_STATE);
-  const [connected, setConnected] = useState(false);
-  const wsRef = useRef(null);
-  const reconnectTimer = useRef(null);
-
-  const connect = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
-
-    try {
-      const ws = new WebSocket(TENSOR_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnected(true);
-        if (reconnectTimer.current) {
-          clearTimeout(reconnectTimer.current);
-          reconnectTimer.current = null;
-        }
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          // Skip binary messages (handled by useTensorStream)
-          if (typeof event.data !== 'string') return;
-
-          const msg = JSON.parse(event.data);
-
-          if (msg.type === 'state_sync' && msg.state) {
-            setState((prev) => ({ ...prev, ...msg.state, lastHeartbeat: Date.now() }));
-          } else if (msg.type === 'heartbeat') {
-            setState((prev) => ({ ...prev, lastHeartbeat: Date.now() }));
-          } else if (msg.type === 'mode_switched') {
-            setState((prev) => ({ ...prev, mode: msg.mode }));
-          } else if (msg.type === 'error') {
-            // Server-side error — logged for debugging
-          }
-        } catch {
-          // Ignore parse errors for non-JSON messages
-        }
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        wsRef.current = null;
-        reconnectTimer.current = setTimeout(connect, 2000);
-      };
-
-      ws.onerror = () => ws.close();
-    } catch {
-      reconnectTimer.current = setTimeout(connect, 2000);
-    }
-  }, []);
 
   useEffect(() => {
-    connect();
-    return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (wsRef.current) wsRef.current.close();
-    };
-  }, [connect]);
+    const handler = (raw) => {
+      try {
+        const msg = JSON.parse(raw);
 
-  // Server expects { command: "...", ...params }
+        if (msg.type === 'state_sync' && msg.state) {
+          setState((prev) => ({ ...prev, ...msg.state, lastHeartbeat: Date.now() }));
+        } else if (msg.type === 'heartbeat') {
+          setState((prev) => ({ ...prev, lastHeartbeat: Date.now() }));
+        } else if (msg.type === 'mode_switched') {
+          setState((prev) => ({ ...prev, mode: msg.mode }));
+        }
+      } catch {
+        // Ignore non-JSON text messages
+      }
+    };
+
+    addTextListener(handler);
+    return () => removeTextListener(handler);
+  }, [addTextListener, removeTextListener]);
+
   const sendCommand = useCallback((command, payload = {}) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ command, ...payload }));
-    }
-  }, []);
+    send(JSON.stringify({ command, ...payload }));
+  }, [send]);
 
   const updateState = useCallback((patch) => {
     setState((prev) => ({ ...prev, ...patch }));

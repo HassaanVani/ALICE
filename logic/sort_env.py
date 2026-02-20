@@ -25,7 +25,7 @@ class ChimpSortEnv(gym.Env):
     SORTED_ZONE_Y = 50
     SLOT_WIDTH = 50
 
-    def __init__(self, max_steps: int = 50):
+    def __init__(self, max_steps: int = 50, seed: int = None):
         super().__init__()
         self.action_space = spaces.Discrete(self.NUM_BLOCKS)
         self.observation_space = spaces.Box(
@@ -35,7 +35,7 @@ class ChimpSortEnv(gym.Env):
         self._step_count = 0
         self._block_positions = np.zeros((self.NUM_BLOCKS, 2), dtype=np.float32)
         self._placed = np.zeros(self.NUM_BLOCKS, dtype=bool)
-        self._rng = np.random.default_rng()
+        self._rng = np.random.default_rng(seed)
 
     def reset(self, seed=None, options=None) -> Tuple[np.ndarray, dict]:
         super().reset(seed=seed)

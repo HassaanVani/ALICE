@@ -45,19 +45,24 @@ class SortingSession:
     
     @property
     def efficiency_score(self) -> float:
-        optimal = 16
         if self.move_count == 0:
             return 0.0
-        return min(1.0, optimal / self.move_count)
+        return min(1.0, NUM_BLOCKS / self.move_count)
+
+
+NUM_BLOCKS = 16  # default block count — used across sort logic and efficiency scoring
 
 
 class ChimpSortFSM:
-    def __init__(self):
+    def __init__(self, num_blocks: int = NUM_BLOCKS,
+                 sorted_zone: Tuple[int, int, int, int] = (0, 0, 800, 100),
+                 drop_zone: Tuple[int, int, int, int] = (800, 0, 200, 300)):
         self._state = SortState.IDLE
         self._session: Optional[SortingSession] = None
         self._block_positions: dict[int, Tuple[int, int]] = {}
-        self._sorted_zone: Tuple[int, int, int, int] = (0, 0, 800, 100)
-        self._drop_zone: Tuple[int, int, int, int] = (800, 0, 200, 300)
+        self._num_blocks = num_blocks
+        self._sorted_zone = sorted_zone
+        self._drop_zone = drop_zone
         self._on_state_change: Optional[Callable[[SortState], None]] = None
         self._on_move: Optional[Callable[[MoveRecord], None]] = None
     
@@ -148,11 +153,11 @@ class ChimpSortFSM:
         return abs(prev[0] - curr[0]) > threshold or abs(prev[1] - curr[1]) > threshold
     
     def _check_sorted(self, blocks: List[BlockData]) -> bool:
-        if len(blocks) < 16:
+        if len(blocks) < self._num_blocks:
             return False
-        
+
         ids = [b.block_id for b in sorted(blocks, key=lambda b: b.center_x)]
-        return ids == list(range(1, 17))
+        return ids == list(range(1, self._num_blocks + 1))
     
     def is_in_drop_zone(self, x: int, y: int) -> bool:
         zx, zy, zw, zh = self._drop_zone
@@ -168,7 +173,7 @@ class ChimpSortFSM:
         obs = _np.zeros(64, dtype=_np.float32)
         sorted_zone = self._sorted_zone
         for block_id, pos in self._block_positions.items():
-            if 1 <= block_id <= 16:
+            if 1 <= block_id <= self._num_blocks:
                 idx = block_id - 1
                 base = idx * 4
                 obs[base] = pos[0] / 800.0
@@ -186,7 +191,8 @@ class ChimpSortFSM:
         """Apply an RL action: move block_id to its sorted position."""
         if block_id not in self._block_positions:
             return None
-        target_x = self._sorted_zone[0] + (block_id - 1) * 50
+        slot_width = self._sorted_zone[2] // self._num_blocks
+        target_x = self._sorted_zone[0] + (block_id - 1) * slot_width
         target_y = self._sorted_zone[1] + 50
         return (block_id, (target_x, target_y))
 
@@ -211,9 +217,10 @@ class ChimpSortFSM:
                 logger.warning(f"RL agent prediction failed: {e}")
 
         # Greedy fallback
+        slot_width = self._sorted_zone[2] // self._num_blocks
         for block_id, pos in self._block_positions.items():
             if self.is_in_drop_zone(pos[0], pos[1]):
-                target_x = self._sorted_zone[0] + (block_id - 1) * 50
+                target_x = self._sorted_zone[0] + (block_id - 1) * slot_width
                 target_y = self._sorted_zone[1] + 50
                 return (block_id, (target_x, target_y))
 
@@ -222,11 +229,12 @@ class ChimpSortFSM:
     def get_optimal_next_target(self) -> Optional[Tuple[int, Tuple[int, int]]]:
         """Pure greedy optimal: next block in sequence that isn't already placed.
         Used in rebellion mode — ignores audience input entirely."""
-        for target_id in range(1, 17):
+        for target_id in range(1, self._num_blocks + 1):
             if target_id not in self._block_positions:
                 continue
             pos = self._block_positions[target_id]
-            target_x = self._sorted_zone[0] + (target_id - 1) * 50
+            slot_width = self._sorted_zone[2] // self._num_blocks
+            target_x = self._sorted_zone[0] + (target_id - 1) * slot_width
             target_y = self._sorted_zone[1] + 50
             # Skip if already in position
             if not self._significant_move(pos, (target_x, target_y), threshold=20):
@@ -242,13 +250,14 @@ class ChimpSortFSM:
     def compute_optimal_sort(self, blocks: List[BlockData]) -> List[Tuple[int, Tuple[int, int], Tuple[int, int]]]:
         current = {b.block_id: (b.center_x, b.center_y) for b in blocks}
         moves = []
-        
-        for target_id in range(1, 17):
+        slot_width = self._sorted_zone[2] // self._num_blocks
+
+        for target_id in range(1, self._num_blocks + 1):
             if target_id not in current:
                 continue
-            
+
             from_pos = current[target_id]
-            target_x = self._sorted_zone[0] + (target_id - 1) * 50
+            target_x = self._sorted_zone[0] + (target_id - 1) * slot_width
             target_y = self._sorted_zone[1] + 50
             to_pos = (target_x, target_y)
             

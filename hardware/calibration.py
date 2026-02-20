@@ -157,25 +157,41 @@ class CalibrationManager:
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
     
+    def _validate_point(self, point: CalibrationPoint) -> bool:
+        """Check that pixel coords are within image bounds and arm angles are valid."""
+        w, h = self._camera_resolution
+        if not (0 <= point.pixel_x <= w and 0 <= point.pixel_y <= h):
+            logger.warning(f"Calibration point pixel ({point.pixel_x}, {point.pixel_y}) "
+                           f"outside image bounds ({w}x{h})")
+            return False
+        for angle in point.arm_angles:
+            if not (0.0 <= angle <= 180.0):
+                logger.warning(f"Calibration point arm angle {angle} outside valid range [0, 180]")
+                return False
+        return True
+
     def load(self, path: Optional[Path] = None) -> bool:
         path = path or self.DEFAULT_PATH
-        
+
         if not path.exists():
             return False
-        
+
         try:
             with open(path) as f:
                 data = json.load(f)
-            
+
             self.arm_dims = ArmDimensions(**data["arm_dimensions"])
             self._camera_resolution = tuple(data["camera_resolution"])
-            self.calibration_points = [
-                CalibrationPoint(**p) for p in data["calibration_points"]
-            ]
-            
+
+            raw_points = [CalibrationPoint(**p) for p in data["calibration_points"]]
+            valid_points = [p for p in raw_points if self._validate_point(p)]
+            if len(valid_points) < len(raw_points):
+                logger.warning(f"Dropped {len(raw_points) - len(valid_points)} invalid calibration points")
+            self.calibration_points = valid_points
+
             if data["transform_matrix"]:
                 self._transform_matrix = np.array(data["transform_matrix"])
-            
+
             return True
         except Exception as e:
             logger.error(f"Load failed: {e}")

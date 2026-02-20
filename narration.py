@@ -160,16 +160,22 @@ class NarrationService:
             )
         return None
 
+    LLM_TIMEOUT = 10.0  # seconds — prevent narration loop from stalling on API hang
+
     async def _generate_text(self, prompt: str) -> Optional[str]:
         """Generate narration text using Gemini, or fall back to rule-based text."""
         if not self._genai_model:
             return self._fallback_narration()
 
         try:
-            response = await asyncio.to_thread(
-                self._genai_model.generate_content, prompt
+            response = await asyncio.wait_for(
+                asyncio.to_thread(self._genai_model.generate_content, prompt),
+                timeout=self.LLM_TIMEOUT,
             )
             return response.text.strip() if response and response.text else self._fallback_narration()
+        except asyncio.TimeoutError:
+            logger.warning(f"Gemini API timed out after {self.LLM_TIMEOUT}s")
+            return self._fallback_narration()
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
             return self._fallback_narration()

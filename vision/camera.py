@@ -43,6 +43,7 @@ class CameraFeed:
         self._capture: Optional[cv2.VideoCapture] = None
         self._frame: Optional[np.ndarray] = None
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._health = CameraHealth.UNKNOWN
@@ -106,17 +107,19 @@ class CameraFeed:
             return
 
         self._running = True
-        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._capture_loop, daemon=False)
         self._thread.start()
 
     def stop(self) -> None:
         self._running = False
+        self._stop_event.set()
         if self._thread:
-            self._thread.join(timeout=1.0)
+            self._thread.join(timeout=2.0)
             self._thread = None
 
     def _capture_loop(self) -> None:
-        while self._running and self._capture and self._capture.isOpened():
+        while not self._stop_event.is_set() and self._capture and self._capture.isOpened():
             ret, frame = self._capture.read()
             if ret:
                 with self._lock:

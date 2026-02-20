@@ -1,6 +1,7 @@
 """Real-time block tracking with Kalman filter and Hungarian algorithm association."""
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 
@@ -79,79 +80,83 @@ class BlockTracker:
     def __init__(self):
         self._tracks: Dict[int, TrackedBlock] = {}  # track_id -> TrackedBlock
         self._next_track_id: int = 1
+        self._lock = threading.Lock()
 
     @property
     def active_tracks(self) -> List[TrackedBlock]:
         return [t for t in self._tracks.values() if t.frames_since_seen <= MAX_MISSING_FRAMES]
 
     def update(self, detections: List[BlockData]) -> List[TrackedBlock]:
-        """Update tracker with new detections, return tracked results."""
-        # Predict step for all existing tracks
-        for track in self._tracks.values():
-            track.predict()
-            track.frames_since_seen += 1
+        """Update tracker with new detections, return tracked results.
 
-        if not detections and not self._tracks:
-            return []
+        Thread-safe: all Kalman predict/correct calls are serialized by _lock.
+        """
+        with self._lock:
+            # Predict step for all existing tracks
+            for track in self._tracks.values():
+                track.predict()
+                track.frames_since_seen += 1
 
-        # Build cost matrix for Hungarian algorithm
-        tracks_list = list(self._tracks.values())
-        n_tracks = len(tracks_list)
-        n_dets = len(detections)
+            if not detections and not self._tracks:
+                return []
 
-        if n_tracks == 0:
-            # All detections become new tracks
-            for det in detections:
-                self._create_track(det)
-            return self.active_tracks
+            # Build cost matrix for Hungarian algorithm
+            tracks_list = list(self._tracks.values())
+            n_tracks = len(tracks_list)
+            n_dets = len(detections)
 
-        if n_dets == 0:
-            # Just age existing tracks, prune old
+            if n_tracks == 0:
+                # All detections become new tracks
+                for det in detections:
+                    self._create_track(det)
+                return self.active_tracks
+
+            if n_dets == 0:
+                # Just age existing tracks, prune old
+                self._prune_lost_tracks()
+                return self.active_tracks
+
+            # Cost matrix: distance between predicted track positions and detection positions
+            cost = np.full((n_tracks, n_dets), ASSOCIATION_THRESHOLD * 2, dtype=np.float32)
+            for i, track in enumerate(tracks_list):
+                for j, det in enumerate(detections):
+                    dist = np.sqrt((track.filtered_x - det.center_x) ** 2 +
+                                   (track.filtered_y - det.center_y) ** 2)
+                    # Penalize block_id mismatch to prefer same-ID associations
+                    if track.block_id != det.block_id:
+                        dist += ASSOCIATION_THRESHOLD * 0.5
+                    cost[i, j] = dist
+
+            # Greedy matching (good enough for 16 blocks)
+            matched_tracks = set()
+            matched_dets = set()
+
+            while True:
+                min_val = cost.min()
+                if min_val >= ASSOCIATION_THRESHOLD:
+                    break
+                idx = np.unravel_index(cost.argmin(), cost.shape)
+                i, j = idx
+
+                tracks_list[i].update(
+                    detections[j].center_x,
+                    detections[j].center_y,
+                    detections[j].confidence
+                )
+                tracks_list[i].block_id = detections[j].block_id
+                matched_tracks.add(i)
+                matched_dets.add(j)
+
+                cost[i, :] = ASSOCIATION_THRESHOLD * 2
+                cost[:, j] = ASSOCIATION_THRESHOLD * 2
+
+            # Create new tracks for unmatched detections
+            for j in range(n_dets):
+                if j not in matched_dets:
+                    self._create_track(detections[j])
+
             self._prune_lost_tracks()
             return self.active_tracks
-
-        # Cost matrix: distance between predicted track positions and detection positions
-        cost = np.full((n_tracks, n_dets), ASSOCIATION_THRESHOLD * 2, dtype=np.float32)
-        for i, track in enumerate(tracks_list):
-            for j, det in enumerate(detections):
-                dist = np.sqrt((track.filtered_x - det.center_x) ** 2 +
-                               (track.filtered_y - det.center_y) ** 2)
-                # Penalize block_id mismatch to prefer same-ID associations
-                if track.block_id != det.block_id:
-                    dist += ASSOCIATION_THRESHOLD * 0.5
-                cost[i, j] = dist
-
-        # Hungarian algorithm (Munkres)
-        matched_tracks = set()
-        matched_dets = set()
-
-        # Greedy matching for simplicity (good enough for 16 blocks)
-        while True:
-            min_val = cost.min()
-            if min_val >= ASSOCIATION_THRESHOLD:
-                break
-            idx = np.unravel_index(cost.argmin(), cost.shape)
-            i, j = idx
-
-            tracks_list[i].update(
-                detections[j].center_x,
-                detections[j].center_y,
-                detections[j].confidence
-            )
-            tracks_list[i].block_id = detections[j].block_id
-            matched_tracks.add(i)
-            matched_dets.add(j)
-
-            cost[i, :] = ASSOCIATION_THRESHOLD * 2
-            cost[:, j] = ASSOCIATION_THRESHOLD * 2
-
-        # Create new tracks for unmatched detections
-        for j in range(n_dets):
-            if j not in matched_dets:
-                self._create_track(detections[j])
-
-        self._prune_lost_tracks()
-        return self.active_tracks
 
     def _create_track(self, det: BlockData) -> TrackedBlock:
         track = TrackedBlock(

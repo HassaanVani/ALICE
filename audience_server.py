@@ -181,8 +181,8 @@ class AudienceServer:
                 emoji = data.get("emoji", "")
                 await self._handle_reaction(client_id, emoji)
 
-        except (json.JSONDecodeError, ValueError, TypeError):
-            pass
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.debug(f"Malformed audience message: {e}")
 
     async def _handle_block_vote(self, client_id: str, block_id: int,
                                   websocket: WebSocketServerProtocol) -> None:

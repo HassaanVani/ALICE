@@ -18,10 +18,13 @@ logger = logging.getLogger("TensorServer")
 
 
 class TensorStreamServer:
+    MAX_CLIENT_QUEUE = 8  # drop frames if client is this far behind
+
     def __init__(self, host: str = "localhost", port: int = 8765):
         self.host = host
         self.port = port
         self.clients: Set[WebSocketServerProtocol] = set()
+        self._client_queues: dict[WebSocketServerProtocol, asyncio.Queue] = {}
         self.pipeline: Optional[InferencePipeline] = None
         self._server = None
         self._streaming = False
@@ -52,6 +55,8 @@ class TensorStreamServer:
 
     async def register(self, websocket: WebSocketServerProtocol) -> None:
         self.clients.add(websocket)
+        self._client_queues[websocket] = asyncio.Queue(maxsize=self.MAX_CLIENT_QUEUE)
+        asyncio.create_task(self._client_sender(websocket))
         logger.info(f"Client connected. Total: {len(self.clients)}")
 
         # Send initial state sync
@@ -64,6 +69,7 @@ class TensorStreamServer:
     async def unregister(self, websocket: WebSocketServerProtocol) -> None:
         self.clients.discard(websocket)
         self._camera_stream_clients.discard(websocket)
+        self._client_queues.pop(websocket, None)
         logger.info(f"Client disconnected. Total: {len(self.clients)}")
 
     async def handler(self, websocket: WebSocketServerProtocol) -> None:
@@ -153,23 +159,43 @@ class TensorStreamServer:
                         "state": snapshot,
                     }))
 
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.debug(f"Malformed JSON from client: {e}")
+
+    async def _client_sender(self, websocket: WebSocketServerProtocol) -> None:
+        """Per-client sender drains the queue — applies back-pressure."""
+        queue = self._client_queues.get(websocket)
+        if not queue:
+            return
+        try:
+            while True:
+                data = await queue.get()
+                await websocket.send(data)
+        except (websockets.exceptions.ConnectionClosed, asyncio.CancelledError):
             pass
+        finally:
+            self.clients.discard(websocket)
+            self._camera_stream_clients.discard(websocket)
+            self._client_queues.pop(websocket, None)
 
     async def broadcast(self, data: bytes) -> None:
         if not self.clients:
             return
 
-        dead_clients = set()
-
-        for client in self.clients:
+        for client in list(self.clients):
+            queue = self._client_queues.get(client)
+            if queue is None:
+                continue
+            if queue.full():
+                # Drop oldest frame for this slow client
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
             try:
-                await client.send(data)
-            except websockets.exceptions.ConnectionClosed:
-                dead_clients.add(client)
-
-        for client in dead_clients:
-            self.clients.discard(client)
+                queue.put_nowait(data)
+            except asyncio.QueueFull:
+                pass
 
     async def stream_loop(self) -> None:
         self._streaming = True

@@ -1,5 +1,13 @@
 export class GestureController {
-    constructor() {
+    /**
+     * @param {Object} [thresholds] — override default gesture distance thresholds.
+     * @param {number} [thresholds.pinchClose] — thumb-index distance to trigger pinch (default 0.06)
+     * @param {number} [thresholds.cursorThreshold] — distance for cursor activation (default 0.10)
+     * @param {number} [thresholds.fullPinch] — distance for full-hand pinch (default 0.075)
+     * @param {number} [thresholds.reloadDist] — rotation anchor reload distance (default 0.12)
+     * @param {number} [thresholds.panThreshold] — min movement for panning (default 0.02)
+     */
+    constructor(thresholds = {}) {
         this.prevLandmarks = null;
         this.prevHandCenter = { x: 0, y: 0 };
         this.isRotating = false;
@@ -26,13 +34,13 @@ export class GestureController {
             onCursor: null
         };
 
-        this.PINCH_CLOSE = 0.06;
-        this.CURSOR_THRESHOLD = 0.10;
-        this.FULL_PINCH = 0.075;
-        this.RELOAD_DIST = 0.12;
-        this.HOLD_TIME = 180;
-        this.ZOOM_COOLDOWN = 150;
-        this.PAN_THRESHOLD = 0.02;
+        this.PINCH_CLOSE = thresholds.pinchClose ?? 0.06;
+        this.CURSOR_THRESHOLD = thresholds.cursorThreshold ?? 0.10;
+        this.FULL_PINCH = thresholds.fullPinch ?? 0.075;
+        this.RELOAD_DIST = thresholds.reloadDist ?? 0.12;
+        this.HOLD_TIME = thresholds.holdTime ?? 180;
+        this.ZOOM_COOLDOWN = thresholds.zoomCooldown ?? 150;
+        this.PAN_THRESHOLD = thresholds.panThreshold ?? 0.02;
 
         this.zoomSensitivity = 1.0;
         this.rotationSensitivity = 1.0;
@@ -60,8 +68,6 @@ export class GestureController {
     onRecenter(callback) { this.callbacks.onRecenter = callback; return this; }
     onGestureChange(callback) { this.callbacks.onGestureChange = callback; return this; }
     onCursor(callback) { this.callbacks.onCursor = callback; return this; }
-    onFreeze(callback) { this.callbacks.onFreeze = callback; return this; }
-    onLayerNav(callback) { this.callbacks.onLayerNav = callback; return this; }
 
     processLandmarks(landmarks) {
         if (!landmarks) {

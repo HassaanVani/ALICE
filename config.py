@@ -62,6 +62,13 @@ class RecordingConfig:
 
 
 @dataclass
+class TimingConfig:
+    idle_loop_s: float = 0.1
+    sort_loop_s: float = 0.016
+    camera_poll_s: float = 0.01
+
+
+@dataclass
 class TetrisScreenConfig:
     board_left: int = 0
     board_top: int = 0
@@ -85,6 +92,7 @@ class AliceConfig:
     narration: NarrationConfig = field(default_factory=NarrationConfig)
     selftest: SelfTestConfig = field(default_factory=SelfTestConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
+    timing: TimingConfig = field(default_factory=TimingConfig)
     tetris_screen: TetrisScreenConfig = field(default_factory=TetrisScreenConfig)
 
 
@@ -112,19 +120,24 @@ def _apply_env_overrides(data: dict) -> dict:
         "ALICE_AUDIENCE_PORT": ("websocket", "audience_port"),
     }
 
+    # Env vars that should stay as raw strings (e.g. serial port paths)
+    _string_only = {"ALICE_ARM_PORT", "ALICE_MAGNET_PORT", "ALICE_IMU_PORT", "ALICE_MODE"}
+
     for env_var, path in env_map.items():
         value = os.environ.get(env_var)
         if value is None:
             continue
 
-        # Type coerce
-        if value.lower() in ("true", "false"):
-            value = value.lower() == "true"
-        else:
-            try:
-                value = int(value)
-            except ValueError:
-                pass
+        # String-only vars: skip boolean/int coercion to preserve casing
+        if env_var not in _string_only:
+            lower = value.lower()
+            if lower in ("true", "false"):
+                value = lower == "true"
+            else:
+                try:
+                    value = int(value)
+                except ValueError:
+                    pass
 
         # Set nested value
         d = data
@@ -192,6 +205,13 @@ def _dict_to_config(data: dict) -> AliceConfig:
         output_dir=rec_data.get("output_dir", "recordings"),
     )
 
+    tm_data = data.get("timing", {})
+    timing = TimingConfig(
+        idle_loop_s=tm_data.get("idle_loop_s", 0.1),
+        sort_loop_s=tm_data.get("sort_loop_s", 0.016),
+        camera_poll_s=tm_data.get("camera_poll_s", 0.01),
+    )
+
     ts_data = data.get("tetris_screen", {})
     tetris_screen = TetrisScreenConfig(
         board_left=ts_data.get("board_left", 0),
@@ -211,6 +231,7 @@ def _dict_to_config(data: dict) -> AliceConfig:
         narration=narration,
         selftest=selftest,
         recording=recording,
+        timing=timing,
         tetris_screen=tetris_screen,
     )
 

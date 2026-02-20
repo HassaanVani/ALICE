@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { TENSOR_WS_URL } from '../ws-config.js';
+import { useState, useEffect } from 'react';
+import { useAliceSocket } from './AliceSocketProvider.jsx';
 
 /**
  * Decodes binary activation data from the ALICE backend.
@@ -50,52 +50,20 @@ function decodeBinaryActivations(buffer) {
 }
 
 export function useTensorStream() {
+  const { addBinaryListener, removeBinaryListener } = useAliceSocket();
   const [activations, setActivations] = useState([]);
-  const wsRef = useRef(null);
-  const reconnectTimer = useRef(null);
-
-  const connect = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
-
-    try {
-      const ws = new WebSocket(TENSOR_WS_URL);
-      ws.binaryType = 'arraybuffer';
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        // Server auto-broadcasts tensors to all clients — no subscription needed
-      };
-
-      ws.onmessage = (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          const layers = decodeBinaryActivations(event.data);
-          if (layers.length > 0) {
-            setActivations(layers);
-          }
-        }
-        // Ignore text messages (handled by useAliceState)
-      };
-
-      ws.onclose = () => {
-        wsRef.current = null;
-        reconnectTimer.current = setTimeout(connect, 3000);
-      };
-
-      ws.onerror = () => {
-        ws.close();
-      };
-    } catch (err) {
-      reconnectTimer.current = setTimeout(connect, 3000);
-    }
-  }, []);
 
   useEffect(() => {
-    connect();
-    return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (wsRef.current) wsRef.current.close();
+    const handler = (buffer) => {
+      const layers = decodeBinaryActivations(buffer);
+      if (layers.length > 0) {
+        setActivations(layers);
+      }
     };
-  }, [connect]);
+
+    addBinaryListener(handler);
+    return () => removeBinaryListener(handler);
+  }, [addBinaryListener, removeBinaryListener]);
 
   return { activations };
 }
