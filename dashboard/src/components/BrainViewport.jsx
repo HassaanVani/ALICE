@@ -36,6 +36,7 @@ export default function BrainViewport({ activations }) {
   const glassRef = useRef(null);
   const rafRef = useRef(null);
   const timeRef = useRef(0);
+  const [showWaiting, setShowWaiting] = React.useState(true);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -187,6 +188,13 @@ export default function BrainViewport({ activations }) {
     };
   }, []);
 
+  // Hide waiting label on first activation data
+  useEffect(() => {
+    if (activations && activations.length > 0 && showWaiting) {
+      setShowWaiting(false);
+    }
+  }, [activations, showWaiting]);
+
   // Update voxel activations when data changes
   useEffect(() => {
     if (!voxelsRef.current || !activations || activations.length === 0) return;
@@ -235,6 +243,25 @@ export default function BrainViewport({ activations }) {
 
   return (
     <div ref={containerRef} style={styles.container}>
+      {showWaiting && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          fontSize: 11,
+          color: '#52525b',
+          fontFamily: 'var(--font-mono)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          pointerEvents: 'none',
+          zIndex: 2,
+          transition: 'opacity 0.6s ease',
+          opacity: showWaiting ? 1 : 0,
+        }}>
+          Waiting for tensor data...
+        </div>
+      )}
       <div style={styles.label}>
         GLASS BRAIN | {VOXEL_GRID}x{VOXEL_GRID}x{VOXEL_GRID} voxels
       </div>

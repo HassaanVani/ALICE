@@ -63,10 +63,33 @@ export default function CameraPanel({ frameRef }) {
     <div style={styles.container}>
       <canvas ref={canvasRef} style={styles.canvas} />
       {!frameRef.current && (
-        <div style={{ ...styles.placeholder, position: 'absolute' }}>
-          <div style={{ marginBottom: 4 }}>NO SIGNAL</div>
-          <div style={{ fontSize: 10, color: '#3f3f46' }}>Waiting for camera feed...</div>
-        </div>
+        <>
+          {/* Scan-line effect */}
+          <div style={{
+            position: 'absolute',
+            left: 0,
+            width: '100%',
+            height: '8%',
+            background: 'linear-gradient(180deg, transparent, rgba(59,130,246,0.08), transparent)',
+            animation: 'scanline 3s linear infinite',
+            pointerEvents: 'none',
+            zIndex: 1,
+          }} />
+          <div style={{ ...styles.placeholder, position: 'absolute' }}>
+            <div style={{ marginBottom: 4 }}>NO SIGNAL</div>
+            <div style={{ fontSize: 10, color: '#3f3f46', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: '#3b82f6',
+                animation: 'pulse 1.5s ease-in-out infinite',
+                display: 'inline-block',
+              }} />
+              Waiting for camera feed...
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

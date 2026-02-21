@@ -104,13 +104,28 @@ function LayerBars({ layer }) {
 export default function ActivationPanel({ activations }) {
   if (!activations || activations.length === 0) {
     return (
-      <div style={styles.placeholder}>
-        <div>
-          <div>No activation data</div>
-          <div style={{ fontSize: 10, color: '#3f3f46', marginTop: 4 }}>
-            Waiting for tensor stream...
+      <div style={{ ...styles.container, gap: 14 }}>
+        {[1, 2, 3].map((n) => (
+          <div key={n} style={styles.layerRow}>
+            <div style={{ ...styles.layerLabel, opacity: 0.4 }}>
+              <span style={{
+                width: 60,
+                height: 10,
+                borderRadius: 3,
+                background: 'linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%)',
+                backgroundSize: '200% 100%',
+                animation: 'shimmer 1.5s infinite',
+                display: 'inline-block',
+              }} />
+            </div>
+            <div style={{
+              ...styles.barContainer,
+              background: 'linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%)',
+              backgroundSize: '200% 100%',
+              animation: `shimmer 1.5s infinite ${n * 0.2}s`,
+            }} />
           </div>
-        </div>
+        ))}
       </div>
     );
   }

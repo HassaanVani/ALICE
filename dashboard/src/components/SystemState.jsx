@@ -39,8 +39,8 @@ const styles = {
     color: '#52525b',
     textTransform: 'uppercase',
     letterSpacing: '0.1em',
-    marginTop: 6,
-    marginBottom: 2,
+    marginTop: 8,
+    marginBottom: 4,
   },
 };
 

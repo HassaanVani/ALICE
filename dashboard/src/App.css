@@ -234,3 +234,36 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
 }
+
+/* Tablet: sidebar drops below */
+@media (max-width: 1200px) {
+  .dashboard { grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr 1fr auto auto; }
+  .panel-sidebar { grid-column: 1 / -1; grid-row: 4; flex-direction: row; flex-wrap: wrap; }
+  .panel-sidebar > .panel { min-width: 280px; flex: 1; }
+}
+
+/* Mobile: single column */
+@media (max-width: 768px) {
+  .dashboard { grid-template-columns: 1fr; grid-template-rows: auto; gap: 4px; padding: 4px; }
+  .panel-camera, .panel-brain, .panel-activations, .panel-arm { grid-column: 1; grid-row: auto; }
+  .panel-sidebar { grid-column: 1; flex-direction: column; }
+  .dashboard-footer { flex-direction: column; }
+  .panel-body { padding: 8px; }
+}
+
+/* Accessibility */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+html { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
+
+/* Shimmer for skeleton loaders */
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
+/* Block overlay fade-in */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Toast slide-in */
+@keyframes toastSlideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* Camera scan-line */
+@keyframes scanline { 0% { top: -10%; } 100% { top: 110%; } }

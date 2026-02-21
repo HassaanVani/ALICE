@@ -58,6 +58,7 @@ export default function ModeControls({ currentMode, sendCommand, updateState }) 
           <button
             key={mode.id}
             onClick={() => handleSwitch(mode.id)}
+            aria-label={mode.label}
             style={{
               ...styles.button,
               borderColor: isActive ? mode.color : '#27272a',

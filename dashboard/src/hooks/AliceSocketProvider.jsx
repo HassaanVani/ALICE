@@ -13,6 +13,7 @@ export function AliceSocketProvider({ children }) {
   const textListenersRef = useRef(new Set());
   const binaryListenersRef = useRef(new Set());
   const reconnectTimer = useRef(null);
+  const reconnectDelay = useRef(1000);
 
   const connect = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
@@ -24,6 +25,7 @@ export function AliceSocketProvider({ children }) {
 
       ws.onopen = () => {
         setConnected(true);
+        reconnectDelay.current = 1000;
         if (reconnectTimer.current) {
           clearTimeout(reconnectTimer.current);
           reconnectTimer.current = null;
@@ -45,12 +47,14 @@ export function AliceSocketProvider({ children }) {
       ws.onclose = () => {
         setConnected(false);
         wsRef.current = null;
-        reconnectTimer.current = setTimeout(connect, 2000);
+        reconnectTimer.current = setTimeout(connect, reconnectDelay.current);
+        reconnectDelay.current = Math.min(reconnectDelay.current * 2, 16000);
       };
 
       ws.onerror = () => ws.close();
     } catch {
-      reconnectTimer.current = setTimeout(connect, 2000);
+      reconnectTimer.current = setTimeout(connect, reconnectDelay.current);
+      reconnectDelay.current = Math.min(reconnectDelay.current * 2, 16000);
     }
   }, []);
 

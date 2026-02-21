@@ -27,6 +27,7 @@ export default function BlockOverlay({ blocks }) {
         height: '100%',
         pointerEvents: 'none',
         zIndex: 10,
+        animation: 'fadeIn 0.3s ease forwards',
       }}
       viewBox="0 0 640 480"
       preserveAspectRatio="xMidYMid meet"

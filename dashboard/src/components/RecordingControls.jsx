@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 const styles = {
   container: {
@@ -50,8 +50,30 @@ const styles = {
   },
 };
 
+function formatElapsed(seconds) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
 export default function RecordingControls({ sendCommand, recording }) {
   const [replayFile, setReplayFile] = useState('');
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(null);
+
+  useEffect(() => {
+    if (recording) {
+      startRef.current = Date.now();
+      setElapsed(0);
+      const interval = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      startRef.current = null;
+      setElapsed(0);
+    }
+  }, [recording]);
 
   const handleRecord = () => {
     if (recording) {
@@ -82,6 +104,7 @@ export default function RecordingControls({ sendCommand, recording }) {
           className={`btn ${recording ? 'btn-danger' : 'btn-success'}`}
           onClick={handleRecord}
           style={{ padding: '4px 12px', fontSize: 10 }}
+          aria-label={recording ? 'Stop recording' : 'Start recording'}
         >
           {recording ? 'STOP' : 'REC'}
         </button>
@@ -89,6 +112,7 @@ export default function RecordingControls({ sendCommand, recording }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={styles.recDot} />
             <span style={styles.recLabel}>RECORDING</span>
+            <span style={styles.timeLabel}>{formatElapsed(elapsed)}</span>
           </div>
         )}
       </div>
@@ -103,6 +127,7 @@ export default function RecordingControls({ sendCommand, recording }) {
           placeholder="latest"
           value={replayFile}
           onChange={(e) => setReplayFile(e.target.value)}
+          aria-label="Replay file name"
           style={{
             width: 100,
             padding: '4px 8px',
@@ -119,6 +144,7 @@ export default function RecordingControls({ sendCommand, recording }) {
           className="btn"
           onClick={handleReplay}
           style={{ padding: '4px 10px', fontSize: 10 }}
+          aria-label="Play replay"
         >
           PLAY
         </button>
@@ -126,6 +152,7 @@ export default function RecordingControls({ sendCommand, recording }) {
           className="btn"
           onClick={handleReplayStop}
           style={{ padding: '4px 10px', fontSize: 10 }}
+          aria-label="Stop replay"
         >
           STOP
         </button>
@@ -139,6 +166,7 @@ export default function RecordingControls({ sendCommand, recording }) {
           className="btn btn-accent"
           onClick={handleSnapshot}
           style={{ padding: '4px 12px', fontSize: 10 }}
+          aria-label="Take snapshot"
         >
           SNAPSHOT
         </button>

@@ -66,14 +66,26 @@ const styles = {
   },
 };
 
-function Cell({ filled }) {
+const PIECE_COLORS = {
+  1: '#06b6d4',
+  2: '#eab308',
+  3: '#a855f7',
+  4: '#22c55e',
+  5: '#ef4444',
+  6: '#3b82f6',
+  7: '#f97316',
+};
+
+function Cell({ value }) {
+  const filled = value !== 0;
+  const color = PIECE_COLORS[value] || '#06b6d4';
   return (
     <div style={{
       width: CELL_SIZE,
       height: CELL_SIZE,
-      background: filled ? '#22d3ee' : '#0a0a0c',
+      background: filled ? color : '#0a0a0c',
       borderRadius: 2,
-      boxShadow: filled ? '0 0 4px #22d3ee55' : 'none',
+      boxShadow: filled ? `0 0 4px ${color}55` : 'none',
     }} />
   );
 }
@@ -115,7 +127,7 @@ export default function TetrisDashboard({ state }) {
         <div style={styles.boardContainer}>
           <div style={styles.board}>
             {board.flat().map((cell, i) => (
-              <Cell key={i} filled={cell !== 0} />
+              <Cell key={i} value={cell} />
             ))}
           </div>
         </div>
