@@ -7,6 +7,8 @@ import BrainViewport from './components/BrainViewport.jsx';
 import SimulatedArm from './components/SimulatedArm/SimulatedArm.jsx';
 import SystemState from './components/SystemState.jsx';
 import ModeControls from './components/ModeControls.jsx';
+import SortDashboard from './components/SortDashboard.jsx';
+import TetrisDashboard from './components/TetrisDashboard.jsx';
 import RecordingControls from './components/RecordingControls.jsx';
 import Audience from './pages/Audience.jsx';
 import { AliceSocketProvider } from './hooks/AliceSocketProvider.jsx';
@@ -134,6 +136,8 @@ function Dashboard() {
             <SystemState state={state} connected={connected} cameraConnected={cameraConnected} />
           </div>
         </div>
+        <SortDashboard state={state} />
+        <TetrisDashboard state={state} />
         <div className="panel" style={{ flex: 0 }}>
           <div className="panel-header">
             <h2>Mode Controls</h2>
