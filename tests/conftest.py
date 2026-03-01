@@ -24,3 +24,20 @@ def sample_color_image():
     """Random 64x64x3 uint8 BGR image."""
     rng = np.random.default_rng(42)
     return rng.integers(0, 256, size=(64, 64, 3), dtype=np.uint8)
+
+
+@pytest.fixture
+def sim_arm():
+    """Simulated ArmController, connected and ready."""
+    from hardware.arm_controller import ArmController
+    arm = ArmController(simulate=True)
+    arm.connect()
+    return arm
+
+
+@pytest.fixture
+def sim_gripper():
+    """Simulated SuctionGripperAdapter wrapping a simulated SuctionDriver."""
+    from hardware.suction_driver import SuctionDriver
+    from hardware.gripper import SuctionGripperAdapter
+    return SuctionGripperAdapter(SuctionDriver(simulate=True))
