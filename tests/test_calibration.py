@@ -13,31 +13,34 @@ def cal():
 
 class TestCalibrationManager:
     def test_validate_valid_point(self, cal):
-        point = CalibrationPoint(pixel_x=500, pixel_y=300, arm_angles=(90.0, 90.0, 90.0, 90.0, 90.0))
+        # Use angles within per-joint limits: J1 ±162, J2 -2..90, J3 -92..60, J4 ±180
+        point = CalibrationPoint(pixel_x=500, pixel_y=300, arm_angles=(0.0, 45.0, -30.0, 0.0))
         assert cal._validate_point(point) is True
 
     def test_validate_rejects_pixel_out_of_bounds(self, cal):
-        point = CalibrationPoint(pixel_x=2000, pixel_y=300, arm_angles=(90.0, 90.0, 90.0, 90.0, 90.0))
+        point = CalibrationPoint(pixel_x=2000, pixel_y=300, arm_angles=(0.0, 45.0, -30.0, 0.0))
         assert cal._validate_point(point) is False
 
     def test_validate_rejects_negative_pixel(self, cal):
-        point = CalibrationPoint(pixel_x=-10, pixel_y=300, arm_angles=(90.0, 90.0, 90.0, 90.0, 90.0))
+        point = CalibrationPoint(pixel_x=-10, pixel_y=300, arm_angles=(0.0, 45.0, -30.0, 0.0))
         assert cal._validate_point(point) is False
 
-    def test_validate_rejects_angle_over_180(self, cal):
-        point = CalibrationPoint(pixel_x=500, pixel_y=300, arm_angles=(90.0, 200.0, 90.0, 90.0, 90.0))
+    def test_validate_rejects_angle_over_limit(self, cal):
+        # J2 max is 90, so 200 should be rejected
+        point = CalibrationPoint(pixel_x=500, pixel_y=300, arm_angles=(0.0, 200.0, 0.0, 0.0))
         assert cal._validate_point(point) is False
 
-    def test_validate_rejects_negative_angle(self, cal):
-        point = CalibrationPoint(pixel_x=500, pixel_y=300, arm_angles=(90.0, -5.0, 90.0, 90.0, 90.0))
+    def test_validate_rejects_angle_under_limit(self, cal):
+        # J2 min is -2, so -5 should be rejected
+        point = CalibrationPoint(pixel_x=500, pixel_y=300, arm_angles=(0.0, -5.0, 0.0, 0.0))
         assert cal._validate_point(point) is False
 
     def test_transform_matrix_after_4_points(self, cal):
         points = [
-            (100, 100, (45.0, 90.0, 90.0, 90.0, 90.0)),
-            (500, 100, (90.0, 90.0, 90.0, 90.0, 90.0)),
-            (100, 500, (45.0, 45.0, 90.0, 90.0, 90.0)),
-            (500, 500, (135.0, 45.0, 90.0, 90.0, 90.0)),
+            (100, 100, (45.0, 30.0, -30.0, 0.0)),
+            (500, 100, (0.0, 45.0, -20.0, 0.0)),
+            (100, 500, (45.0, 20.0, -10.0, 0.0)),
+            (500, 500, (90.0, 20.0, -10.0, 0.0)),
         ]
         for px, py, angles in points:
             cal.add_calibration_point(px, py, angles)
@@ -46,6 +49,6 @@ class TestCalibrationManager:
         assert cal._transform_matrix.shape == (3, 3)
 
     def test_no_transform_with_fewer_than_4_points(self, cal):
-        cal.add_calibration_point(100, 100, (90.0, 90.0, 90.0, 90.0, 90.0))
-        cal.add_calibration_point(500, 100, (90.0, 90.0, 90.0, 90.0, 90.0))
+        cal.add_calibration_point(100, 100, (0.0, 45.0, -30.0, 0.0))
+        cal.add_calibration_point(500, 100, (0.0, 45.0, -30.0, 0.0))
         assert cal._transform_matrix is None

@@ -36,15 +36,17 @@ class TestHandToArmMapper:
         # Should return cached position
         assert isinstance(x, float)
 
-    def test_solve_ik_returns_5_angles(self, mapper):
+    def test_solve_ik_returns_4_angles(self, mapper):
         angles = mapper.solve_ik(0, 150, 50)
-        assert len(angles) == 5
-        for a in angles:
-            assert 0 <= a <= 180
+        assert len(angles) == 4
+        # Verify each angle is within its joint limits
+        limits = ((-162, 162), (-2, 90), (-92, 60), (-180, 180))
+        for a, (lo, hi) in zip(angles, limits):
+            assert lo <= a <= hi
 
     def test_hand_to_angles_end_to_end(self, mapper):
         angles = mapper.hand_to_angles(0.5, 0.5, 0.5)
-        assert len(angles) == 5
+        assert len(angles) == 4
 
     def test_reset_clears_last_position(self, mapper):
         mapper.hand_to_world(0.5, 0.5, 0.5)

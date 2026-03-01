@@ -19,10 +19,13 @@ class CalibrationPoint:
 
 @dataclass
 class ArmDimensions:
+    """Arm link lengths in mm — measure from actual hardware."""
     base_height: float = 50.0
     shoulder_length: float = 100.0
     elbow_length: float = 100.0
     wrist_length: float = 80.0
+
+JOINT_LIMITS = ((-162, 162), (-2, 90), (-92, 60), (-180, 180))
 
 
 class CalibrationManager:
@@ -80,17 +83,17 @@ class CalibrationManager:
     
     def _angles_to_workspace(self, angles: Tuple[float, ...]) -> Tuple[float, float]:
         base, shoulder, elbow, *_ = angles
-        
-        base_rad = math.radians(base - 90)
-        shoulder_rad = math.radians(shoulder - 90)
-        elbow_rad = math.radians(elbow - 90)
-        
+
+        base_rad = math.radians(base)
+        shoulder_rad = math.radians(shoulder)
+        elbow_rad = math.radians(elbow)
+
         r = (self.arm_dims.shoulder_length * math.cos(shoulder_rad) +
              self.arm_dims.elbow_length * math.cos(shoulder_rad + elbow_rad))
-        
+
         x = r * math.cos(base_rad)
         y = r * math.sin(base_rad)
-        
+
         return (x, y)
     
     def pixel_to_arm(self, pixel_x: int, pixel_y: int, z: float = 0) -> Tuple[float, ...]:
@@ -113,37 +116,36 @@ class CalibrationManager:
         return self._inverse_kinematics(world_x, world_y, z)
     
     def _inverse_kinematics(self, x: float, y: float, z: float) -> Tuple[float, ...]:
-        base_angle = math.degrees(math.atan2(y, x)) + 90
-        
+        j1 = math.degrees(math.atan2(y, x))  # base rotation, centered at 0
+
         r = math.sqrt(x*x + y*y)
         target_z = z - self.arm_dims.base_height + self.arm_dims.wrist_length
-        
+
         L1 = self.arm_dims.shoulder_length
         L2 = self.arm_dims.elbow_length
-        
+
         d = math.sqrt(r*r + target_z*target_z)
         d = min(d, L1 + L2 - 1)
-        
+
         cos_elbow = (d*d - L1*L1 - L2*L2) / (2 * L1 * L2)
         cos_elbow = max(-1, min(1, cos_elbow))
         elbow_angle = math.degrees(math.acos(cos_elbow))
-        
+
         alpha = math.atan2(target_z, r)
         cos_beta = (L1*L1 + d*d - L2*L2) / (2 * L1 * d)
         cos_beta = max(-1, min(1, cos_beta))
         beta = math.acos(cos_beta)
-        shoulder_angle = math.degrees(alpha + beta) + 90
-        
-        wrist_pitch = 90
-        wrist_roll = 90
-        
-        return (
-            max(0, min(180, base_angle)),
-            max(0, min(180, shoulder_angle)),
-            max(0, min(180, 180 - elbow_angle)),
-            wrist_pitch,
-            wrist_roll
-        )
+        j2 = math.degrees(alpha + beta)  # shoulder
+
+        j3 = -elbow_angle  # elbow (negative convention for the 260)
+
+        j4 = 0  # keep suction cup pointing down for top-down picking
+
+        def _clamp(val, idx):
+            lo, hi = JOINT_LIMITS[idx]
+            return max(lo, min(hi, val))
+
+        return (_clamp(j1, 0), _clamp(j2, 1), _clamp(j3, 2), _clamp(j4, 3))
     
     def save(self, path: Optional[Path] = None) -> None:
         path = path or self.DEFAULT_PATH
@@ -164,10 +166,12 @@ class CalibrationManager:
             logger.warning(f"Calibration point pixel ({point.pixel_x}, {point.pixel_y}) "
                            f"outside image bounds ({w}x{h})")
             return False
-        for angle in point.arm_angles:
-            if not (0.0 <= angle <= 180.0):
-                logger.warning(f"Calibration point arm angle {angle} outside valid range [0, 180]")
-                return False
+        for i, angle in enumerate(point.arm_angles):
+            if i < len(JOINT_LIMITS):
+                lo, hi = JOINT_LIMITS[i]
+                if not (lo <= angle <= hi):
+                    logger.warning(f"Calibration point arm angle {angle} outside valid range [{lo}, {hi}] for joint {i}")
+                    return False
         return True
 
     def load(self, path: Optional[Path] = None) -> bool:

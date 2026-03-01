@@ -22,6 +22,8 @@ class HardwareConfig:
     magnet_port: Optional[str] = None
     magnet_pin: int = 13
     imu_port: Optional[str] = None
+    gripper_type: str = "suction"
+    suction_pin: int = 5
 
 
 @dataclass
@@ -157,6 +159,8 @@ def _dict_to_config(data: dict) -> AliceConfig:
         magnet_port=hw_data.get("magnet", {}).get("port"),
         magnet_pin=hw_data.get("magnet", {}).get("pin", 13),
         imu_port=hw_data.get("imu", {}).get("port"),
+        gripper_type=hw_data.get("gripper_type", "suction"),
+        suction_pin=hw_data.get("suction_pin", 5),
     )
 
     cam_data = data.get("cameras", {})

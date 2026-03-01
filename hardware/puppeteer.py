@@ -20,8 +20,8 @@ class PuppeteerState(Enum):
 class ArmFrame:
     timestamp: float
     angles: Tuple[float, ...]
-    velocities: Tuple[float, ...] = (0.0,) * 5
-    accelerations: Tuple[float, ...] = (0.0,) * 5
+    velocities: Tuple[float, ...] = (0.0,) * 4
+    accelerations: Tuple[float, ...] = (0.0,) * 4
 
 
 def encode_as_neural_activations(frame: ArmFrame) -> dict:

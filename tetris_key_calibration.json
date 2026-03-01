@@ -1,11 +1,11 @@
 {
   "keys": {
-    "left_arrow":  { "angles": [0, 0, 0, 0, 0] },
-    "right_arrow": { "angles": [0, 0, 0, 0, 0] },
-    "up_arrow":    { "angles": [0, 0, 0, 0, 0] },
-    "space":       { "angles": [0, 0, 0, 0, 0] },
-    "z":           { "angles": [0, 0, 0, 0, 0] },
-    "c":           { "angles": [0, 0, 0, 0, 0] }
+    "left_arrow":  { "angles": [0, 0, 0, 0] },
+    "right_arrow": { "angles": [0, 0, 0, 0] },
+    "up_arrow":    { "angles": [0, 0, 0, 0] },
+    "space":       { "angles": [0, 0, 0, 0] },
+    "z":           { "angles": [0, 0, 0, 0] },
+    "c":           { "angles": [0, 0, 0, 0] }
   },
   "press_depth": 8.0,
   "press_delay": 0.04,

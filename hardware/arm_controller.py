@@ -9,10 +9,10 @@ from enum import Enum
 logger = logging.getLogger("ArmController")
 
 try:
-    import serial
-    SERIAL_AVAILABLE = True
+    from pymycobot import MyPalletizer260
+    PYMYCOBOT_AVAILABLE = True
 except ImportError:
-    SERIAL_AVAILABLE = False
+    PYMYCOBOT_AVAILABLE = False
 
 
 class ArmState(Enum):
@@ -24,26 +24,24 @@ class ArmState(Enum):
 
 @dataclass
 class ArmPosition:
-    base: float = 90.0
-    shoulder: float = 90.0
-    elbow: float = 90.0
-    wrist_pitch: float = 90.0
-    wrist_roll: float = 90.0
-    
+    j1: float = 0.0   # base rotation
+    j2: float = 0.0   # shoulder
+    j3: float = 0.0   # elbow
+    j4: float = 0.0   # wrist rotation
+
     def as_tuple(self) -> Tuple[float, ...]:
-        return (self.base, self.shoulder, self.elbow, self.wrist_pitch, self.wrist_roll)
-    
+        return (self.j1, self.j2, self.j3, self.j4)
+
     @classmethod
     def from_tuple(cls, angles: Tuple[float, ...]) -> "ArmPosition":
-        return cls(*angles[:5])
+        return cls(*angles[:4])
 
 
 class ArmController:
-    AXIS_COUNT = 5
-    ANGLE_MIN = 0.0
-    ANGLE_MAX = 180.0
-    HOME_POSITION = ArmPosition(90, 90, 90, 90, 90)
-    
+    AXIS_COUNT = 4
+    JOINT_LIMITS = ((-162, 162), (-2, 90), (-92, 60), (-180, 180))
+    HOME_POSITION = ArmPosition(0, 0, 0, 0)
+
     MAX_RECONNECT_ATTEMPTS = 5
     RECONNECT_BASE_DELAY = 0.5
 
@@ -54,26 +52,38 @@ class ArmController:
             port = get_serial_port("arm")
         self.port = port
         self.baudrate = baudrate
-        self.simulate = simulate or not SERIAL_AVAILABLE
-        self._serial: Optional[serial.Serial] = None
+        self.simulate = simulate or not PYMYCOBOT_AVAILABLE
+        self._mc: Optional["MyPalletizer260"] = None
         self._serial_lock = serial_lock or threading.Lock()
         self._state = ArmState.DISCONNECTED
         self._current_position = ArmPosition()
         self._target_position = ArmPosition()
         self._reconnect_attempts = 0
-    
+
     @property
     def state(self) -> ArmState:
         return self._state
-    
+
     @property
     def position(self) -> ArmPosition:
+        if not self.simulate and self._mc is not None and self._state != ArmState.DISCONNECTED:
+            try:
+                angles = self._mc.get_angles()
+                if angles and len(angles) >= self.AXIS_COUNT:
+                    self._current_position = ArmPosition.from_tuple(tuple(angles))
+            except Exception:
+                pass
         return self._current_position
-    
+
     @property
     def is_connected(self) -> bool:
         return self._state != ArmState.DISCONNECTED
-    
+
+    @property
+    def cobot(self) -> Optional["MyPalletizer260"]:
+        """Expose the underlying MyPalletizer260 instance for shared use (e.g. suction pump)."""
+        return self._mc
+
     def connect(self) -> bool:
         if self.simulate:
             self._state = ArmState.IDLE
@@ -81,16 +91,14 @@ class ArmController:
             return True
 
         try:
-            if self._serial and self._serial.is_open:
-                self._serial.close()
-            self._serial = serial.Serial(self.port, self.baudrate, timeout=1)
-            time.sleep(2)  # Wait for Arduino reset
+            self._mc = MyPalletizer260(self.port, self.baudrate)
+            time.sleep(0.5)
             self._state = ArmState.IDLE
             self._current_position = ArmPosition()
             self._reconnect_attempts = 0
             logger.info(f"Connected on {self.port}")
             return True
-        except serial.SerialException as e:
+        except Exception as e:
             self._state = ArmState.ERROR
             logger.error(f"Connection failed: {e}")
             return False
@@ -107,38 +115,47 @@ class ArmController:
         logger.info(f"Reconnect attempt {self._reconnect_attempts}/{self.MAX_RECONNECT_ATTEMPTS} in {delay:.1f}s")
         time.sleep(delay)
         return self.connect()
-    
+
     def disconnect(self) -> None:
-        if self._serial and self._serial.is_open:
-            self._serial.close()
-        self._serial = None
+        if self._mc is not None:
+            try:
+                self._mc.close() if hasattr(self._mc, 'close') else None
+            except Exception:
+                pass
+        self._mc = None
         self._state = ArmState.DISCONNECTED
-    
+
     def home(self) -> bool:
         return self.move_to(self.HOME_POSITION.as_tuple())
-    
-    def move_to(self, angles: Tuple[float, ...], speed: float = 1.0) -> bool:
+
+    def _clamp_angles(self, angles: Tuple[float, ...]) -> Tuple[float, ...]:
+        """Clamp each joint angle to its per-joint limits."""
+        clamped = []
+        for i, a in enumerate(angles):
+            lo, hi = self.JOINT_LIMITS[i]
+            clamped.append(max(lo, min(hi, a)))
+        return tuple(clamped)
+
+    def move_to(self, angles: Tuple[float, ...], speed: float = 50) -> bool:
         if self._state == ArmState.DISCONNECTED:
             return False
-        
+
         if len(angles) != self.AXIS_COUNT:
             raise ValueError(f"Expected {self.AXIS_COUNT} angles, got {len(angles)}")
-        
-        clamped = tuple(
-            max(self.ANGLE_MIN, min(self.ANGLE_MAX, a)) for a in angles
-        )
+
+        clamped = self._clamp_angles(angles)
         self._target_position = ArmPosition.from_tuple(clamped)
         self._state = ArmState.MOVING
-        
+
         if self.simulate:
             self._simulate_movement(speed)
         else:
-            self._send_command(clamped)
-        
+            self._send_angles(clamped, speed)
+
         self._current_position = self._target_position
         self._state = ArmState.IDLE
         return True
-    
+
     def move_axis(self, axis: int, angle: float) -> bool:
         if axis < 0 or axis >= self.AXIS_COUNT:
             raise ValueError(f"Invalid axis: {axis}")
@@ -148,7 +165,7 @@ class ArmController:
         return self.move_to(tuple(current))
 
     def _simulate_movement(self, speed: float) -> None:
-        steps = int(20 / speed)
+        steps = max(1, int(20 / max(speed / 50, 0.1)))
         delay = 0.01
 
         start = self._current_position.as_tuple()
@@ -161,25 +178,21 @@ class ArmController:
             self._current_position = ArmPosition.from_tuple(interpolated)
             time.sleep(delay)
 
-    def _send_command(self, angles: Tuple[float, ...]) -> None:
+    def _send_angles(self, angles: Tuple[float, ...], speed: float) -> None:
         with self._serial_lock:
-            if not self._serial or not self._serial.is_open:
+            if self._mc is None:
                 if not self.reconnect():
                     return
 
-            cmd = ",".join(f"{int(a)}" for a in angles) + "\n"
             try:
-                self._serial.write(cmd.encode())
-                self._serial.flush()
-
-                response = self._serial.readline().decode().strip()
-                if response != "OK":
-                    logger.warning(f"Unexpected response: {response}")
-            except serial.SerialException as e:
-                logger.error(f"Serial write failed: {e}")
+                # speed for pymycobot: 0-100
+                sp = max(0, min(100, int(speed)))
+                self._mc.send_angles(list(angles), sp)
+            except Exception as e:
+                logger.error(f"send_angles failed: {e}")
                 self._state = ArmState.ERROR
                 self.reconnect()
-    
+
     def set_compliant(self, enabled: bool) -> None:
         """Put arm into compliant (torque-off) mode for kinesthetic teaching."""
         if self.simulate:
@@ -187,13 +200,14 @@ class ArmController:
             return
 
         with self._serial_lock:
-            if not self._serial or not self._serial.is_open:
+            if self._mc is None:
                 return
 
             try:
-                cmd = f"TORQUE:{'0' if enabled else '1'}\n"
-                self._serial.write(cmd.encode())
-                self._serial.flush()
+                if enabled:
+                    self._mc.release_all_servos()
+                else:
+                    self._mc.power_on()
                 logger.info(f"Compliance {'enabled' if enabled else 'disabled'}")
             except Exception as e:
                 logger.error(f"Failed to set compliance: {e}")

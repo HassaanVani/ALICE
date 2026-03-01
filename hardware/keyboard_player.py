@@ -14,14 +14,14 @@ logger = logging.getLogger("KeyboardPlayer")
 class KeyPosition:
     """A keyboard key's hover position (arm angles) and press parameters."""
     name: str
-    hover_angles: Tuple[float, float, float, float, float]
+    hover_angles: Tuple[float, ...]
 
 
 class KeyboardPlayer:
     """Presses physical keyboard keys by moving the robotic arm.
 
     Loads key positions from a calibration JSON file. Each key has a set of
-    hover angles (5-axis). A press is: move to hover -> lower wrist_pitch
+    hover angles (4-axis). A press is: move to hover -> lower J3 (elbow)
     by press_depth -> wait press_delay -> raise back.
     """
 
@@ -52,8 +52,8 @@ class KeyboardPlayer:
 
             for name, info in data.get("keys", {}).items():
                 angles = tuple(info["angles"])
-                if len(angles) != 5:
-                    logger.warning(f"Key '{name}' has {len(angles)} angles, expected 5")
+                if len(angles) != 4:
+                    logger.warning(f"Key '{name}' has {len(angles)} angles, expected 4")
                     continue
                 self._keys[name] = KeyPosition(name=name, hover_angles=angles)
 
@@ -81,9 +81,9 @@ class KeyboardPlayer:
             self.arm.move_to(key.hover_angles)
             await asyncio.sleep(self._travel_delay)
 
-            # Press: lower wrist_pitch
+            # Press: lower J3 (elbow) to push down
             pressed = list(key.hover_angles)
-            pressed[3] = pressed[3] - self._press_depth  # wrist_pitch index
+            pressed[2] = pressed[2] - self._press_depth  # J3 elbow index
             self.arm.move_to(tuple(pressed))
             await asyncio.sleep(self._press_delay)
 

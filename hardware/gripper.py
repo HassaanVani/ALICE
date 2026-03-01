@@ -60,6 +60,37 @@ class MagnetGripperAdapter(Gripper):
         return False
 
 
+class SuctionGripperAdapter(Gripper):
+    """Wraps SuctionDriver as a Gripper — binary only (threshold at 0.5)."""
+
+    def __init__(self, suction_driver):
+        self._pump = suction_driver
+        self._position = 0.0
+
+    def open(self) -> bool:
+        self._position = 0.0
+        return self._pump.off()
+
+    def close(self) -> bool:
+        self._position = 1.0
+        return self._pump.on()
+
+    def set_position(self, position: float) -> bool:
+        position = max(0.0, min(1.0, position))
+        self._position = position
+        if position >= 0.5:
+            return self._pump.on()
+        else:
+            return self._pump.off()
+
+    def get_position(self) -> float:
+        return self._position
+
+    @property
+    def is_proportional(self) -> bool:
+        return False
+
+
 class ServoGripper(Gripper):
     """Servo-based gripper — maps position to servo angle range."""
 
@@ -114,14 +145,19 @@ class ServoGripper(Gripper):
         return True
 
 
-def create_gripper(gripper_type: str = "magnet", magnet_driver=None, **kwargs) -> Gripper:
+def create_gripper(gripper_type: str = "suction", magnet_driver=None,
+                   suction_driver=None, **kwargs) -> Gripper:
     """Factory for gripper creation based on config."""
-    if gripper_type == "magnet" and magnet_driver is not None:
+    if gripper_type == "suction" and suction_driver is not None:
+        return SuctionGripperAdapter(suction_driver)
+    elif gripper_type == "magnet" and magnet_driver is not None:
         return MagnetGripperAdapter(magnet_driver)
     elif gripper_type == "servo":
         gripper = ServoGripper(**kwargs)
         gripper.connect()
         return gripper
+    elif suction_driver is not None:
+        return SuctionGripperAdapter(suction_driver)
     elif magnet_driver is not None:
         return MagnetGripperAdapter(magnet_driver)
     else:

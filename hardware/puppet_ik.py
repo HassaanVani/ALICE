@@ -90,40 +90,41 @@ class HandToArmMapper:
         self._last_hand_pos = (world_x, world_y, world_z)
         return (world_x, world_y, world_z)
     
+    # MyPalletizer 260 joint limits
+    JOINT_LIMITS = ((-162, 162), (-2, 90), (-92, 60), (-180, 180))
+
     def solve_ik(self, world_x: float, world_y: float, world_z: float) -> Tuple[float, ...]:
-        base_angle = math.degrees(math.atan2(world_y, world_x)) + 90
-        
+        j1 = math.degrees(math.atan2(world_y, world_x))  # base rotation, centered at 0
+
         r = math.sqrt(world_x * world_x + world_y * world_y)
         target_z = world_z - self.geometry.base_height + self.geometry.wrist_length
-        
+
         L1 = self.geometry.shoulder_length
         L2 = self.geometry.elbow_length
-        
+
         d = math.sqrt(r * r + target_z * target_z)
         d = min(d, L1 + L2 - 1)
         d = max(d, abs(L1 - L2) + 1)
-        
+
         cos_elbow = (d * d - L1 * L1 - L2 * L2) / (2 * L1 * L2)
         cos_elbow = max(-1, min(1, cos_elbow))
         elbow_angle = math.degrees(math.acos(cos_elbow))
-        
+
         alpha = math.atan2(target_z, r)
         cos_beta = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d)
         cos_beta = max(-1, min(1, cos_beta))
         beta = math.acos(cos_beta)
-        shoulder_angle = math.degrees(alpha + beta) + 90
-        
-        wrist_pitch = 90 - (shoulder_angle - 90) - (180 - elbow_angle)
-        wrist_pitch = max(0, min(180, wrist_pitch + 90))
-        wrist_roll = 90
-        
-        return (
-            max(0, min(180, base_angle)),
-            max(0, min(180, shoulder_angle)),
-            max(0, min(180, 180 - elbow_angle)),
-            wrist_pitch,
-            wrist_roll
-        )
+        j2 = math.degrees(alpha + beta)  # shoulder
+
+        j3 = -elbow_angle  # elbow
+
+        j4 = 0  # keep suction cup oriented down
+
+        def _clamp(val, idx):
+            lo, hi = self.JOINT_LIMITS[idx]
+            return max(lo, min(hi, val))
+
+        return (_clamp(j1, 0), _clamp(j2, 1), _clamp(j3, 2), _clamp(j4, 3))
     
     def hand_to_angles(self, hand_x: float, hand_y: float, hand_z: float) -> Tuple[float, ...]:
         world = self.hand_to_world(hand_x, hand_y, hand_z)

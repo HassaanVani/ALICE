@@ -13,6 +13,8 @@ hardware:
     pin: 13
   imu:
     port: null
+  gripper_type: suction
+  suction_pin: 5
 
 cameras:
   overhead:
