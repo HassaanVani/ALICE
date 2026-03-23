@@ -1,4 +1,12 @@
-"""LLM narration service — async Gemini commentary with pyttsx3 TTS."""
+"""ALICE voice service — async Gemini first-person voice with pyttsx3 TTS.
+
+ALICE speaks rarely. Silence is the default. When she speaks, it should feel
+like she chose to. The voice gate (from PersonalityEngine) determines whether
+speech is warranted. The LLM generates what she says. [silence] means she
+decided not to speak.
+
+See PERSONALITY.md § Speech for the full spec.
+"""
 
 import asyncio
 import logging
@@ -10,7 +18,7 @@ logger = logging.getLogger("Narration")
 
 
 class NarrationService:
-    """Async loop that monitors state changes and produces voice narration."""
+    """ALICE's voice — monitors state and speaks only when she chooses to."""
 
     def __init__(self, enabled: bool = False, voice_rate: int = 175,
                  min_interval: int = 8, model: str = "gemini-pro"):
@@ -24,10 +32,15 @@ class NarrationService:
         self._tts_engine = None
         self._genai_model = None
         self._state_manager = None
+        self._personality = None
         self._last_mode: Optional[str] = None
 
     def set_state_manager(self, state_manager) -> None:
         self._state_manager = state_manager
+
+    def set_personality(self, personality_engine) -> None:
+        """Connect personality engine for voice gate decisions."""
+        self._personality = personality_engine
 
     def _init_tts(self) -> bool:
         try:
@@ -78,7 +91,11 @@ class NarrationService:
         self._running = False
 
     async def _check_and_narrate(self) -> None:
-        """Check state changes and generate narration if interval elapsed."""
+        """Check state changes and generate narration if interval elapsed.
+
+        Voice gate: personality engine decides if speech is warranted.
+        If the LLM returns [silence], ALICE chose not to speak.
+        """
         if not self._state_manager:
             return
 
@@ -86,15 +103,31 @@ class NarrationService:
         if now - self._last_narration_time < self.min_interval:
             return
 
+        # Voice gate — ask personality engine if speech is appropriate
+        if self._personality is not None:
+            topic = self._state_manager.state.mode
+            if not self._personality.should_speak(topic=topic):
+                return
+
         state = self._state_manager.state
         prompt = self._build_prompt(state)
         if not prompt:
             return
 
         text = await self._generate_text(prompt)
-        if text:
+        if not text:
+            return
+
+        # [silence] means ALICE chose not to speak — respect that
+        if text.strip().lower() == "[silence]":
+            logger.debug("ALICE chose silence")
             self._last_narration_time = now
-            await self._speak(text)
+            return
+
+        self._last_narration_time = now
+        if self._personality is not None:
+            self._personality.record_speech(topic=state.mode)
+        await self._speak(text)
 
     def _build_prompt(self, state) -> Optional[str]:
         """Build a mode-specific prompt from current state."""
@@ -160,7 +193,7 @@ class NarrationService:
             )
         return None
 
-    LLM_TIMEOUT = 10.0  # seconds — prevent narration loop from stalling on API hang
+    LLM_TIMEOUT = 10.0  # seconds — configurable via alice.yaml narration.llm_timeout
 
     async def _generate_text(self, prompt: str) -> Optional[str]:
         """Generate narration text using Gemini, or fall back to rule-based text."""
@@ -181,58 +214,48 @@ class NarrationService:
             return self._fallback_narration()
 
     def _fallback_narration(self) -> Optional[str]:
-        """Rule-based narration when Gemini is unavailable."""
+        """Rule-based first-person narration when Gemini is unavailable.
+
+        ALICE's voice: short, dry, lowercase energy. Most states return None
+        (silence) because she doesn't narrate her own actions.
+        """
         if not self._state_manager:
             return None
         state = self._state_manager.state
 
+        # Check voice gate — most states don't warrant speech
+        if self._personality is not None:
+            if not self._personality.should_speak(topic=state.mode):
+                return None
+
         if state.mode == "demo":
-            if state.sort_state == "scrambling":
-                return "Shuffling the blocks for the next round."
-            if state.sort_state == "human_benchmark":
-                elapsed = time.time() - state.sort_start_time if state.sort_start_time else 0
-                return f"Human sorting in progress. {state.sort_move_count} moves in {elapsed:.0f} seconds."
-            elif state.sort_state == "ghost_replay":
-                return "Now replaying the human's sorting strategy."
-            elif state.sort_state == "awaiting_puppeteer":
-                return "Waiting for a volunteer to control the arm. Step up and move your hand."
-            elif state.sort_state == "cyborg_coop":
-                return f"Cyborg cooperation active. {state.sort_move_count} moves so far."
-            elif state.sort_state == "rebellion":
-                if state.rebellion_crowd_choice and state.rebellion_robot_choice:
-                    if state.rebellion_crowd_choice != state.rebellion_robot_choice:
-                        return (f"The audience voted block {state.rebellion_crowd_choice}. "
-                                f"ALICE chose block {state.rebellion_robot_choice}. "
-                                f"We gave her permission to decide.")
-                return f"ALICE is sorting autonomously. {state.sort_move_count} moves, ignoring all suggestions."
+            if state.sort_state == "rebellion":
+                if (state.rebellion_crowd_choice and state.rebellion_robot_choice
+                        and state.rebellion_crowd_choice != state.rebellion_robot_choice):
+                    return "no."
             elif state.sort_state == "complete":
-                return "Sorting complete. Well done, team."
+                return None  # silence — she doesn't celebrate
         elif state.mode == "auto_sort":
-            phase = state.auto_sort_phase
-            if phase == "scrambling":
-                return f"Scrambling blocks for cycle {state.auto_sort_cycle}."
-            elif phase == "solving":
-                return f"Solving cycle {state.auto_sort_cycle}. {state.sort_move_count} moves so far."
-            elif phase == "complete":
-                return f"Cycle {state.auto_sort_cycle} complete. Starting over."
-            return "Auto-sort standing by."
+            return None  # silence — she's working
         elif state.mode == "auto_tetris":
-            if state.tetris_game_over:
-                return f"Game over. Final score: {state.tetris_score}, {state.tetris_lines} lines cleared."
-            return (f"Playing Tetris on a real keyboard. Level {state.tetris_level}. "
-                    f"Score: {state.tetris_score}, {state.tetris_lines} lines.")
+            return None  # silence — she's in flow
         elif state.mode == "puppeteer":
-            if state.puppeteer_recording:
-                return "Recording arm motion for later playback."
-            return f"Puppeteer mode: {state.puppeteer_state}."
+            return None  # silence — she's being guided
         elif state.mode == "calibrate":
-            return f"Calibration: {state.calibration_points} points collected."
+            return None  # silence — this is setup
 
         return None
 
+    async def speak_immediate(self, text: str) -> None:
+        """Force ALICE to speak — bypasses voice gate. For scripted moments."""
+        if self._personality is not None:
+            self._personality.record_speech(topic="immediate")
+        self._last_narration_time = time.time()
+        await self._speak(text)
+
     async def _speak(self, text: str) -> None:
         """Speak text using pyttsx3 in a thread."""
-        logger.info(f"Narrating: {text}")
+        logger.info(f"ALICE: \"{text}\"")
         if not self._tts_engine:
             return
         try:

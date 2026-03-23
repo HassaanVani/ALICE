@@ -14,7 +14,8 @@ from hardware import (ArmController, MagnetDriver, SuctionDriver, CalibrationMan
                       create_gripper, KinestheticTeacher)
 from vision import CameraManager, CameraConfig, CameraRole, ArucoDetector, BlockTracker
 from brain import InferencePipeline
-from logic import ChimpSortFSM, SortState, TetrisAgent
+from logic import ChimpSortFSM, SortState, TetrisAgent, PersonalityEngine, ActionOrigin
+from hardware.dynamics import MovementDynamics
 from server import TensorStreamServer
 from modes import (ModeContext, DemoState, IdleRunner, AutoSortRunner,
                    AutoTetrisRunner, DemoRunner, CalibrateRunner, PuppeteerRunner)
@@ -94,6 +95,13 @@ class ALICE:
         )
         self.narration.set_state_manager(self.state_manager)
 
+        # Personality engine
+        self.personality = PersonalityEngine()
+        self.dynamics: Optional[MovementDynamics] = None
+
+        # Connect personality to narration voice gate
+        self.narration.set_personality(self.personality)
+
         # RL agent
         self._rl_agent = None
 
@@ -141,6 +149,9 @@ class ALICE:
             # Created after fallback so it always references the live arm
             self.kinesthetic = KinestheticTeacher(self.arm)
 
+            # Movement dynamics — wraps arm with personality-driven speed/hesitation
+            self.dynamics = MovementDynamics(self.arm, self.personality)
+
             self.calibration.load()
 
             # Cameras from config
@@ -166,6 +177,23 @@ class ALICE:
             if STATE_WEIGHTS_PATH.exists():
                 self.inference.load_state_weights(STATE_WEIGHTS_PATH)
                 logger.info(f"Loaded state classifier weights from {STATE_WEIGHTS_PATH}")
+
+            # Apply personality config
+            pc = self.config.personality
+            self.personality.SPEECH_THRESHOLD = pc.speech_threshold
+            self.personality.SPEECH_COOLDOWN = pc.speech_cooldown
+            self.personality.OVERRIDE_COMMENT_THRESHOLD = pc.override_comment_threshold
+            self.personality.IDLE_MICRO_MOTION_DELAY = pc.idle_micro_motion_delay
+            self.personality.IDLE_TETRIS_DELAY = pc.idle_tetris_delay
+            self.personality.IDLE_TETRIS_DELAY_NO_PRESENCE = pc.idle_tetris_delay_alone
+            self.personality.SPEED_MULTIPLIERS = {
+                ActionOrigin.SELF_INITIATED: pc.speed_self_initiated,
+                ActionOrigin.USER_REQUESTED: pc.speed_user_requested,
+                ActionOrigin.CROWD_REQUESTED: pc.speed_crowd_requested,
+                ActionOrigin.OVERRIDE: pc.speed_override,
+            }
+            self.dynamics.MICRO_AMPLITUDE = pc.micro_amplitude_deg
+            self.dynamics.MICRO_PERIOD = pc.micro_period_s
 
             # Wire up servers
             self._ws_server.set_pipeline(self.inference)
@@ -313,6 +341,8 @@ class ALICE:
             puppet_server=self.puppet_server,
             ws_server=self._ws_server,
             rl_agent=self._rl_agent,
+            personality=self.personality,
+            dynamics=self.dynamics,
             is_running=lambda: self._running,
             is_current_mode=lambda: self.mode == current_mode,
         )

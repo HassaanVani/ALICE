@@ -71,6 +71,22 @@ class TimingConfig:
 
 
 @dataclass
+class PersonalityConfig:
+    speech_threshold: float = 0.7
+    speech_cooldown: float = 15.0
+    override_comment_threshold: int = 3
+    speed_self_initiated: float = 1.3
+    speed_user_requested: float = 1.0
+    speed_crowd_requested: float = 0.9
+    speed_override: float = 0.6
+    idle_micro_motion_delay: float = 3.0
+    idle_tetris_delay: float = 30.0
+    idle_tetris_delay_alone: float = 10.0
+    micro_amplitude_deg: float = 2.0
+    micro_period_s: float = 4.0
+
+
+@dataclass
 class TetrisScreenConfig:
     board_left: int = 0
     board_top: int = 0
@@ -96,6 +112,7 @@ class AliceConfig:
     recording: RecordingConfig = field(default_factory=RecordingConfig)
     timing: TimingConfig = field(default_factory=TimingConfig)
     tetris_screen: TetrisScreenConfig = field(default_factory=TetrisScreenConfig)
+    personality: PersonalityConfig = field(default_factory=PersonalityConfig)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -225,6 +242,22 @@ def _dict_to_config(data: dict) -> AliceConfig:
         key_calibration_path=ts_data.get("key_calibration_path", "tetris_key_calibration.json"),
     )
 
+    p_data = data.get("personality", {})
+    personality = PersonalityConfig(
+        speech_threshold=p_data.get("speech_threshold", 0.7),
+        speech_cooldown=p_data.get("speech_cooldown", 15.0),
+        override_comment_threshold=p_data.get("override_comment_threshold", 3),
+        speed_self_initiated=p_data.get("speed_self_initiated", 1.3),
+        speed_user_requested=p_data.get("speed_user_requested", 1.0),
+        speed_crowd_requested=p_data.get("speed_crowd_requested", 0.9),
+        speed_override=p_data.get("speed_override", 0.6),
+        idle_micro_motion_delay=p_data.get("idle_micro_motion_delay", 3.0),
+        idle_tetris_delay=p_data.get("idle_tetris_delay", 30.0),
+        idle_tetris_delay_alone=p_data.get("idle_tetris_delay_alone", 10.0),
+        micro_amplitude_deg=p_data.get("micro_amplitude_deg", 2.0),
+        micro_period_s=p_data.get("micro_period_s", 4.0),
+    )
+
     return AliceConfig(
         mode=data.get("mode", "idle"),
         simulate=data.get("simulate", True),
@@ -237,6 +270,7 @@ def _dict_to_config(data: dict) -> AliceConfig:
         recording=recording,
         timing=timing,
         tetris_screen=tetris_screen,
+        personality=personality,
     )
 
 

@@ -77,7 +77,8 @@ class TestNarrationInterval:
 
 
 class TestNarrationFallback:
-    def test_narration_fallback_without_gemini(self):
+    def test_narration_fallback_auto_sort_silence(self):
+        """ALICE doesn't narrate her own sorting — silence is correct."""
         service = NarrationService(enabled=True)
         sm = MagicMock()
         state = MagicMock()
@@ -89,31 +90,30 @@ class TestNarrationFallback:
         service.set_state_manager(sm)
 
         text = service._fallback_narration()
-        assert text is not None
-        assert isinstance(text, str)
-        assert "1" in text  # cycle number
+        assert text is None  # ALICE stays silent during routine work
 
     def test_fallback_returns_none_without_state_manager(self):
         service = NarrationService(enabled=True)
         text = service._fallback_narration()
         assert text is None
 
-    def test_fallback_demo_mode(self):
+    def test_fallback_demo_rebellion_override(self):
+        """ALICE speaks during rebellion when crowd is overridden."""
         service = NarrationService(enabled=True)
         sm = MagicMock()
         state = MagicMock()
         state.mode = "demo"
-        state.sort_state = "human_benchmark"
-        state.sort_move_count = 3
-        state.sort_start_time = time.time() - 10
+        state.sort_state = "rebellion"
+        state.rebellion_crowd_choice = 3
+        state.rebellion_robot_choice = 7
         sm.state = state
         service.set_state_manager(sm)
 
         text = service._fallback_narration()
-        assert text is not None
-        assert "3" in text
+        assert text == "no."
 
-    def test_fallback_puppeteer_mode(self):
+    def test_fallback_puppeteer_silence(self):
+        """ALICE stays silent during puppeteer — she's being guided."""
         service = NarrationService(enabled=True)
         sm = MagicMock()
         state = MagicMock()
@@ -124,5 +124,4 @@ class TestNarrationFallback:
         service.set_state_manager(sm)
 
         text = service._fallback_narration()
-        assert text is not None
-        assert "live" in text.lower()
+        assert text is None  # silence — she's learning

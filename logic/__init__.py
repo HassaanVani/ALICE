@@ -3,6 +3,10 @@ from .tetris_agent import TetrisAgent
 from .rl_models import SortQNetwork, SortDuelingQNetwork
 from .arm_routines import pick_and_place, auto_scramble, auto_solve, PickPlaceConfig
 from .tetris_controller import TetrisController
+from .personality import (
+    PersonalityEngine, PersonalityState, EmotionalState,
+    ActionOrigin, ObjectPreference,
+)
 
 try:
     from .sort_env import ChimpSortEnv

@@ -39,6 +39,12 @@ class AliceState:
     demo_act_label: str = ""
     detected_blocks: List[Dict] = field(default_factory=list)
     timestamp: float = 0.0
+    # Personality state
+    personality_mood: float = 0.5            # 0.0 = annoyed, 1.0 = content
+    personality_emotion: str = "content"     # current emotional state
+    personality_idle_behavior: str = "watch" # watch, micro_motion, or tetris
+    personality_override_streak: int = 0
+    personality_is_in_flow: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -67,6 +73,11 @@ class AliceState:
             "demo_act_label": self.demo_act_label,
             "detected_blocks": self.detected_blocks,
             "timestamp": self.timestamp,
+            "personality_mood": self.personality_mood,
+            "personality_emotion": self.personality_emotion,
+            "personality_idle_behavior": self.personality_idle_behavior,
+            "personality_override_streak": self.personality_override_streak,
+            "personality_is_in_flow": self.personality_is_in_flow,
         }
 
     def to_json(self) -> str:
@@ -164,6 +175,16 @@ class AliceStateManager:
 
     def update_blocks(self, blocks: List[Dict]) -> None:
         self._state.detected_blocks = blocks
+        self._notify()
+
+    def update_personality(self, mood: float = 0.5, emotion: str = "content",
+                           idle_behavior: str = "watch", override_streak: int = 0,
+                           is_in_flow: bool = False) -> None:
+        self._state.personality_mood = mood
+        self._state.personality_emotion = emotion
+        self._state.personality_idle_behavior = idle_behavior
+        self._state.personality_override_streak = override_streak
+        self._state.personality_is_in_flow = is_in_flow
         self._notify()
 
     def get_snapshot(self) -> dict:

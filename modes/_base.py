@@ -10,9 +10,11 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 if TYPE_CHECKING:
     from config import AliceConfig
     from hardware import ArmController, CalibrationManager, KinestheticTeacher
+    from hardware.dynamics import MovementDynamics
     from vision import ArucoDetector, BlockTracker, CameraManager
     from brain import InferencePipeline
     from logic import ChimpSortFSM, TetrisAgent
+    from logic.personality import PersonalityEngine
     from state import AliceStateManager
     from recording import SessionRecorder
     from audience_server import AudienceServer
@@ -46,6 +48,9 @@ class ModeContext:
 
     is_running: Callable[[], bool] = field(repr=False)
     is_current_mode: Callable[[], bool] = field(repr=False)
+
+    personality: Optional[PersonalityEngine] = None
+    dynamics: Optional[MovementDynamics] = None
 
     def running(self) -> bool:
         """True while the system is running AND still in this mode."""

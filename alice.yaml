@@ -40,6 +40,28 @@ narration:
   voice_rate: 175
   min_interval: 8
   model: gemini-pro
+  llm_timeout: 10.0
+
+personality:
+  # Voice gate — opinion strength must exceed this to trigger speech
+  speech_threshold: 0.7
+  speech_cooldown: 15.0         # seconds between voice outputs
+  override_comment_threshold: 3 # consecutive overrides before she comments
+
+  # Movement dynamics
+  speed_self_initiated: 1.3     # faster — she wants to do this
+  speed_user_requested: 1.0     # baseline
+  speed_crowd_requested: 0.9    # slightly slower
+  speed_override: 0.6           # noticeably slow — she disagrees
+
+  # Idle behavior thresholds (seconds)
+  idle_micro_motion_delay: 3.0  # start subtle scanning after this
+  idle_tetris_delay: 30.0       # drift to tetris when someone's present
+  idle_tetris_delay_alone: 10.0 # faster when nobody's around
+
+  # Idle micro-motion parameters
+  micro_amplitude_deg: 2.0      # degrees — subtle
+  micro_period_s: 4.0           # seconds — slow breathing rhythm
 
 selftest:
   enabled: true
