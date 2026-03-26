@@ -81,10 +81,17 @@ class TestDictToConfig:
         assert cfg.hardware.arm_baudrate == 9600
 
     def test_cameras_mapping(self):
-        data = {"cameras": {"overhead": {"device_id": 2, "width": 640}}}
+        data = {"cameras": {"arm_mounted": {"device_id": 2, "width": 640}}}
         cfg = _dict_to_config(data)
-        assert cfg.overhead_camera.device_id == 2
-        assert cfg.overhead_camera.width == 640
+        assert cfg.arm_camera.device_id == 2
+        assert cfg.arm_camera.width == 640
+
+    def test_cameras_backward_compat(self):
+        """Old 'overhead' key still works."""
+        data = {"cameras": {"overhead": {"device_id": 3, "width": 800}}}
+        cfg = _dict_to_config(data)
+        assert cfg.arm_camera.device_id == 3
+        assert cfg.arm_camera.width == 800
 
     def test_websocket_mapping(self):
         data = {"websocket": {"tensor_port": 1234}}

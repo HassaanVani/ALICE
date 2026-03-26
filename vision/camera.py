@@ -12,8 +12,12 @@ logger = logging.getLogger("Camera")
 
 
 class CameraRole(Enum):
-    OVERHEAD = "overhead"
+    ARM_MOUNTED = "arm_mounted"
     FRONT_FACING = "front"
+
+
+# Backward compatibility alias
+CameraRole.OVERHEAD = CameraRole.ARM_MOUNTED
 
 
 class CameraHealth(Enum):
@@ -281,19 +285,19 @@ class CameraManager:
 
 
 def create_dual_camera_setup(
-    overhead_id: int = 0,
+    arm_id: int = 0,
     front_id: int = 1,
-    overhead_resolution: Tuple[int, int] = (1920, 1080),
+    arm_resolution: Tuple[int, int] = (1920, 1080),
     front_resolution: Tuple[int, int] = (1280, 720)
 ) -> CameraManager:
     manager = CameraManager()
 
-    overhead_config = CameraConfig(
-        device_id=overhead_id,
-        width=overhead_resolution[0],
-        height=overhead_resolution[1],
+    arm_config = CameraConfig(
+        device_id=arm_id,
+        width=arm_resolution[0],
+        height=arm_resolution[1],
         fps=60,
-        role=CameraRole.OVERHEAD
+        role=CameraRole.ARM_MOUNTED
     )
 
     front_config = CameraConfig(
@@ -304,7 +308,7 @@ def create_dual_camera_setup(
         role=CameraRole.FRONT_FACING
     )
 
-    manager.add_camera(overhead_config)
+    manager.add_camera(arm_config)
     manager.add_camera(front_config)
 
     return manager

@@ -16,6 +16,16 @@ DEFAULT_CONFIG_PATH = Path(__file__).parent / "alice.yaml"
 
 
 @dataclass
+class CameraExtrinsicsConfig:
+    x_offset_mm: float = 0.0
+    y_offset_mm: float = 0.0
+    z_offset_mm: float = 30.0
+    roll_deg: float = 0.0
+    pitch_deg: float = -90.0
+    yaw_deg: float = 0.0
+
+
+@dataclass
 class HardwareConfig:
     arm_port: Optional[str] = None
     arm_baudrate: int = 115200
@@ -24,6 +34,7 @@ class HardwareConfig:
     imu_port: Optional[str] = None
     gripper_type: str = "suction"
     suction_pin: int = 5
+    camera_extrinsics: CameraExtrinsicsConfig = field(default_factory=CameraExtrinsicsConfig)
 
 
 @dataclass
@@ -100,7 +111,7 @@ class AliceConfig:
     mode: str = "idle"
     simulate: bool = True
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
-    overhead_camera: CameraConfigYaml = field(default_factory=lambda: CameraConfigYaml(
+    arm_camera: CameraConfigYaml = field(default_factory=lambda: CameraConfigYaml(
         device_id=0, width=1920, height=1080, fps=60
     ))
     front_camera: CameraConfigYaml = field(default_factory=lambda: CameraConfigYaml(
@@ -170,6 +181,17 @@ def _apply_env_overrides(data: dict) -> dict:
 def _dict_to_config(data: dict) -> AliceConfig:
     """Convert raw dict to AliceConfig dataclass tree."""
     hw_data = data.get("hardware", {})
+
+    ce_data = hw_data.get("camera_extrinsics", {})
+    camera_extrinsics = CameraExtrinsicsConfig(
+        x_offset_mm=ce_data.get("x_offset_mm", 0.0),
+        y_offset_mm=ce_data.get("y_offset_mm", 0.0),
+        z_offset_mm=ce_data.get("z_offset_mm", 30.0),
+        roll_deg=ce_data.get("roll_deg", 0.0),
+        pitch_deg=ce_data.get("pitch_deg", -90.0),
+        yaw_deg=ce_data.get("yaw_deg", 0.0),
+    )
+
     hardware = HardwareConfig(
         arm_port=hw_data.get("arm", {}).get("port"),
         arm_baudrate=hw_data.get("arm", {}).get("baudrate", 115200),
@@ -178,17 +200,18 @@ def _dict_to_config(data: dict) -> AliceConfig:
         imu_port=hw_data.get("imu", {}).get("port"),
         gripper_type=hw_data.get("gripper_type", "suction"),
         suction_pin=hw_data.get("suction_pin", 5),
+        camera_extrinsics=camera_extrinsics,
     )
 
     cam_data = data.get("cameras", {})
-    overhead = cam_data.get("overhead", {})
+    arm_data = cam_data.get("arm_mounted", cam_data.get("overhead", {}))
     front = cam_data.get("front", {})
 
-    overhead_camera = CameraConfigYaml(
-        device_id=overhead.get("device_id", 0),
-        width=overhead.get("width", 1920),
-        height=overhead.get("height", 1080),
-        fps=overhead.get("fps", 60),
+    arm_camera = CameraConfigYaml(
+        device_id=arm_data.get("device_id", 0),
+        width=arm_data.get("width", 1920),
+        height=arm_data.get("height", 1080),
+        fps=arm_data.get("fps", 60),
     )
     front_camera = CameraConfigYaml(
         device_id=front.get("device_id", 1),
@@ -262,7 +285,7 @@ def _dict_to_config(data: dict) -> AliceConfig:
         mode=data.get("mode", "idle"),
         simulate=data.get("simulate", True),
         hardware=hardware,
-        overhead_camera=overhead_camera,
+        arm_camera=arm_camera,
         front_camera=front_camera,
         websocket=websocket,
         narration=narration,

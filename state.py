@@ -16,7 +16,7 @@ class AliceState:
     arm_state: str = "idle"
     gripper_position: float = 0.0
     cameras: Dict[str, str] = field(default_factory=lambda: {
-        "overhead": "unknown",
+        "arm_mounted": "unknown",
         "front": "unknown"
     })
     sort_state: str = "idle"

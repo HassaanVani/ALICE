@@ -156,14 +156,14 @@ class ALICE:
 
             # Cameras from config
             self.cameras = CameraManager()
-            oc = self.config.overhead_camera
+            oc = self.config.arm_camera
             fc = self.config.front_camera
-            overhead = CameraConfig(device_id=oc.device_id, width=oc.width,
-                                    height=oc.height, fps=oc.fps, role=CameraRole.OVERHEAD)
+            arm_cam = CameraConfig(device_id=oc.device_id, width=oc.width,
+                                   height=oc.height, fps=oc.fps, role=CameraRole.ARM_MOUNTED)
             front = CameraConfig(device_id=fc.device_id, width=fc.width,
                                  height=fc.height, fps=fc.fps, role=CameraRole.FRONT_FACING)
 
-            self.cameras.add_camera(overhead)
+            self.cameras.add_camera(arm_cam)
             self.cameras.add_camera(front)
 
             self.detector = ArucoDetector()

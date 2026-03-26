@@ -11,6 +11,7 @@ except ImportError:
     WEBSOCKETS_AVAILABLE = False
 
 from brain import InferencePipeline
+from modes import DEMO_VISIBLE_MODES
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -59,10 +60,10 @@ class TensorStreamServer:
         asyncio.create_task(self._client_sender(websocket))
         logger.info(f"Client connected. Total: {len(self.clients)}")
 
-        # Send initial state sync
+        # Send initial state sync (with available modes filtered for demo)
         if self._state_manager:
             try:
-                await websocket.send(self._state_manager.get_state_sync_message())
+                await websocket.send(self._state_sync_with_modes())
             except Exception as e:
                 logger.debug(f"Failed to send initial state sync: {e}")
 
@@ -134,7 +135,7 @@ class TensorStreamServer:
 
             elif command == "get_state":
                 if self._state_manager:
-                    await websocket.send(self._state_manager.get_state_sync_message())
+                    await websocket.send(self._state_sync_with_modes())
 
             elif command == "start_recording":
                 if self._recorder and not self._recorder.is_recording:
@@ -161,6 +162,13 @@ class TensorStreamServer:
 
         except json.JSONDecodeError as e:
             logger.debug(f"Malformed JSON from client: {e}")
+
+    def _state_sync_with_modes(self) -> str:
+        """Return state_sync JSON with available_modes filtered for demos."""
+        raw = self._state_manager.get_state_sync_message()
+        msg = json.loads(raw)
+        msg["available_modes"] = list(DEMO_VISIBLE_MODES)
+        return json.dumps(msg)
 
     async def _client_sender(self, websocket: WebSocketServerProtocol) -> None:
         """Per-client sender drains the queue — applies back-pressure."""
@@ -213,7 +221,7 @@ class TensorStreamServer:
         """Broadcast full state to all dashboard clients at ~2fps."""
         while self._streaming:
             if self.clients and self._state_manager:
-                msg = self._state_manager.get_state_sync_message()
+                msg = self._state_sync_with_modes()
                 dead = set()
                 for client in self.clients.copy():
                     try:

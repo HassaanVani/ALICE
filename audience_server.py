@@ -30,7 +30,7 @@ PHASE_INFO = {
     "auto_sort":           {"label": "Auto Sort",     "desc": "Watch ALICE sort autonomously",         "interactive": False},
     "auto_tetris":         {"label": "Auto Tetris",   "desc": "ALICE plays Tetris on a real keyboard", "interactive": False},
     "demo":                {"label": "Demo",           "desc": "Live 5-act show in progress",          "interactive": False},
-    "calibrate":           {"label": "Calibrating",    "desc": "System calibration",                   "interactive": False},
+    "calibrate":           {"label": "Calibrating",    "desc": "System calibration",                   "interactive": False, "hidden": True},
     "puppeteer":           {"label": "Puppeteer",      "desc": "A volunteer controls the arm",         "interactive": False},
 }
 

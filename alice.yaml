@@ -13,11 +13,16 @@ hardware:
     pin: 13
   imu:
     port: null
-  gripper_type: suction
+  gripper_type: parallel
   suction_pin: 5
+  camera_extrinsics:
+    x_offset_mm: 0
+    y_offset_mm: 0
+    z_offset_mm: 30
+    pitch_deg: -90
 
 cameras:
-  overhead:
+  arm_mounted:
     device_id: 0
     width: 1920
     height: 1080
