@@ -1,0 +1,6 @@
+# Optional dependencies — ALICE degrades gracefully without these.
+# All modules using these libraries wrap imports in try/except and fall
+# back to simulation mode when unavailable.
+
+mediapipe>=0.10.0    # vision/presence.py, vision/hand_detector.py — presence + gesture detection
+open3d>=0.17.0       # vision/spatial_map.py — 3D TSDF reconstruction (no Python 3.13 wheel yet)
