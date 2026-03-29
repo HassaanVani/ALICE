@@ -112,20 +112,24 @@ class TestObjectTrackerWithDetections:
 
 
 class TestInferencePipelineYolo:
-    def test_detect_objects_returns_detections(self):
+    def _make_sim_pipeline(self):
+        """Create a pipeline with YOLO forced to simulation mode."""
         from brain.inference import InferencePipeline
+        from vision.yolo_detector import YoloDetector
         pipeline = InferencePipeline()
-        # Force YOLO to sim mode
-        pipeline.configure_yolo()
+        pipeline._yolo = YoloDetector()
+        pipeline._yolo._simulate = True
+        return pipeline
+
+    def test_detect_objects_returns_detections(self):
+        pipeline = self._make_sim_pipeline()
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
         dets = pipeline.detect_objects(frame)
         assert len(dets) >= 1
         assert all(hasattr(d, "label") for d in dets)
 
     def test_detect_objects_feeds_cnn_activations(self):
-        from brain.inference import InferencePipeline
-        pipeline = InferencePipeline()
-        pipeline.configure_yolo()
+        pipeline = self._make_sim_pipeline()
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
         pipeline.detect_objects(frame)
         # CNN should have run, populating activation hooks
@@ -133,9 +137,7 @@ class TestInferencePipelineYolo:
         assert len(activations) > 0
 
     def test_detect_objects_respects_freeze(self):
-        from brain.inference import InferencePipeline
-        pipeline = InferencePipeline()
-        pipeline.configure_yolo()
+        pipeline = self._make_sim_pipeline()
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
         # Run once to populate activations
         pipeline.detect_objects(frame)
