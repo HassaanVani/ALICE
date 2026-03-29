@@ -1,6 +1,8 @@
-# MyPalletizer 260 M5Stack — Quickstart
+# ALICE Hardware Setup — MyPalletizer 260 M5Stack
 
 Everything you need to go from unboxing to ALICE running on real hardware.
+
+> **Note:** ALICE now uses a dual-camera setup (arm-mounted + front-facing) and supports parallel grippers alongside the original suction pump. The YOLO detector replaces ArUco markers for real desk objects, though ArUco remains for legacy block-sorting modes.
 
 ---
 
@@ -15,8 +17,9 @@ Everything you need to go from unboxing to ALICE running on real hardware.
 
 You also need:
 - A computer with Python 3.10+ and ALICE installed
-- A Logitech C922 (or similar USB camera) + overhead mount
-- 16 wooden cubes with ArUco markers (see `physical_setup.md`)
+- A small USB camera for arm-mounting (Logitech C270 or similar) — ALICE's eyes
+- A USB camera for front-facing mount (Logitech C922 or similar) — presence detection
+- Optional: 16 wooden cubes with ArUco markers for legacy block-sorting modes
 
 ---
 
@@ -71,12 +74,23 @@ Pump wiring (M5Stack GPIO header):
 
 ---
 
-## Step 4: Mount the Camera
+## Step 4: Mount the Cameras
 
-1. Clamp the overhead camera **directly above** the workspace, pointing straight down
+### Arm-mounted camera (ALICE's eyes)
+1. Attach a small USB camera to the end-effector / wrist of the arm
+2. Aim it downward (~90° pitch) so it looks at whatever ALICE is interacting with
+3. Route the USB cable along the arm body, secured with zip ties — leave enough slack for full range of motion
+4. This camera feeds YOLO object detection, monocular depth, and the 3D spatial map
+
+### Front-facing camera (presence detection)
+1. Place a USB camera on a small stand facing where people approach the desk
+2. Aim at chest/face height — this detects who is at the desk via MediaPipe
+3. Does not need to see the desk surface
+
+### Legacy: Overhead camera (optional, for block-sorting modes)
+1. If running ArUco block-sorting modes, clamp a camera directly above the workspace, pointing down
 2. Height: 50–70 cm above the table
-3. Plug it into your computer via USB
-4. Make sure the entire arm reach area is visible in frame
+3. Make sure the entire arm reach area is visible in frame
 
 ---
 
@@ -160,8 +174,20 @@ hardware:
   arm:
     port: "/dev/tty.usbserial-XXXX"   # your port from Step 2
     baudrate: 115200
-  gripper_type: suction
+  gripper_type: parallel               # or "suction" for suction pump
   suction_pin: 5
+
+cameras:
+  arm_mounted:
+    device_id: 0                       # arm camera
+    width: 1920
+    height: 1080
+    fps: 60
+  front:
+    device_id: 1                       # front-facing presence camera
+    width: 1280
+    height: 720
+    fps: 30
 ```
 
 Or just pass it on the command line:
@@ -186,23 +212,25 @@ You should see:
 [INFO] Starting main loop
 ```
 
-The arm is now live. Switch modes from the dashboard or restart with `--mode auto_sort`.
+The arm is now live. Switch modes from the dashboard or restart with `--mode performance` for the new demo arc, or `--mode auto_sort` for legacy block sorting.
 
 ---
 
 ## Step 10: Calibrate
 
-Before ALICE can pick up blocks, you need to calibrate the camera-to-arm mapping.
+Before ALICE can pick up objects, you need to calibrate the camera-to-arm mapping.
 
-1. Place a block with an ArUco marker in the workspace
+1. Place an object in the workspace (any object ALICE can see)
 2. Run: `python main.py --mode calibrate`
-3. Manually jog the arm so the suction cup is directly over the block
-4. Press `c` to capture
-5. Move the block, reposition the arm, press `c` again
+3. Manually jog the arm so the gripper is directly over the object
+4. Press `c` to capture the calibration point
+5. Move the object, reposition the arm, press `c` again
 6. Do this for **at least 4 positions** — use the corners and center of your workspace
 7. Press `s` to save, `q` to quit
 
-Now ALICE knows where blocks are in 3D space.
+Now ALICE can translate "object at pixel (x, y)" into arm joint angles.
+
+> **For the REMODEL desk-assistant experience**, calibration is enhanced by the 3D spatial map. After calibrating, run `--mode performance` — the wake-up scan in Act 2 builds a full 3D model of the workspace using forward kinematics + monocular depth.
 
 ---
 

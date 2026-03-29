@@ -1,5 +1,14 @@
 # ALICE — Known Issues & Technical Debt
 
+> **Status: All 25 original issues resolved.** This file is kept for historical reference. New issues should be tracked in GitHub Issues.
+
+## Current Known Issues
+
+- **websockets deprecation warnings** — `server.py` and `puppet_server.py` import the legacy `WebSocketServerProtocol` API, which is deprecated in websockets 14+. Should migrate to the new `websockets.serve()` / `ServerConnection` API.
+- **Dashboard not yet updated** — Dashboard still uses the old panel layout. The glassmorphism redesign is planned in `dashboard/REDESIGN.md` but not yet implemented.
+
+---
+
 ## P0 — Critical (data corruption, crashes, hangs)
 
 - [x] **Serial port race condition** — Added `threading.Lock` shared between `ArmController` and `MagnetDriver`. All serial I/O (`_send_command`, `set_compliant`, `toggle`) now acquires the lock. `main.py` passes the same lock to both. (`arm_controller.py`, `magnet_driver.py`, `main.py`)

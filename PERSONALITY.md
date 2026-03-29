@@ -218,36 +218,94 @@ Her emotion is the difference between two speeds of arm movement. Between a paus
 
 ## Implementation Architecture
 
+All personality systems are fully implemented and tested. Here's where they live:
+
+### Module Map
+
+| System | Module | Key class |
+|---|---|---|
+| Personality engine | `logic/personality.py` | `PersonalityEngine` |
+| Movement dynamics | `hardware/dynamics.py` | `MovementDynamics` |
+| Object preferences | `logic/personality.py` | `ObjectPreference` |
+| Object memory (persistent) | `logic/object_memory.py` | `ObjectMemory` |
+| Desk presets | `logic/desk_presets.py` | `DeskPreset`, `PRESETS` |
+| Desk organization | `logic/desk_organizer.py` | `DeskOrganizer` |
+| Tea choreography | `logic/tea_choreography.py` | `TeaChoreography` |
+| Fist bump | `logic/fist_bump.py` | `FistBumpInteraction` |
+| Teaching ("show ALICE") | `logic/teaching.py` | `TeachingSession` |
+| Narration (first-person) | `narration.py` | `NarrationService` |
+| Presence detection | `vision/presence.py` | `PresenceDetector` |
+| Performance mode | `modes/performance.py` | `PerformanceRunner` |
+
 ### Personality Engine (State Machine)
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                 Personality Engine               │
+│          PersonalityEngine (logic/personality.py)│
 │                                                  │
 │  ┌──────────┐  ┌───────────┐  ┌──────────────┐  │
-│  │ Preference│  │  Opinion  │  │   Movement   │  │
-│  │   Model   │  │  Strength │  │   Dynamics   │  │
-│  │           │  │           │  │              │  │
-│  │ per-object│  │ 0.0 → 1.0 │  │ speed curves │  │
-│  │ positions │  │ threshold │  │ hesitation   │  │
-│  │ history   │  │ for speech│  │ micro-motion │  │
+│  │ Object   │  │  Opinion  │  │   Movement   │  │
+│  │Preference│  │  Strength │  │   Dynamics   │  │
+│  │          │  │           │  │              │  │
+│  │ per-obj  │  │ 0.0 → 1.0│  │ speed curves │  │
+│  │ positions│  │ threshold │  │ hesitation   │  │
+│  │ history  │  │ for speech│  │ micro-motion │  │
 │  └──────────┘  └───────────┘  └──────────────┘  │
 │                                                  │
 │  ┌──────────────────┐  ┌─────────────────────┐   │
 │  │   Voice Gate     │  │   Idle Behavior     │   │
-│  │                  │  │                     │   │
-│  │ should_speak()   │  │ tetris vs watch vs  │   │
-│  │ silence default  │  │ micro-movement      │   │
-│  │ opinion threshold│  │ transition curves   │   │
+│  │ should_speak()   │  │ get_idle_behavior() │   │
+│  │ SPEECH_THRESHOLD │  │ watch → micro_motion│   │
+│  │ = 0.7            │  │ → tetris            │   │
 │  └──────────────────┘  └─────────────────────┘   │
 └─────────────────────────────────────────────────┘
 ```
 
+### Emotional States (`logic/personality.py:EmotionalState`)
+
+```python
+CONTENT    = "content"     # smooth, efficient — desk is how she likes it
+CURIOUS    = "curious"     # new object, new person — slower, investigative
+ANNOYED    = "annoyed"     # overridden, displaced — micro-pause, slower
+FOCUSED    = "focused"     # tetris, complex org — rhythmic, precise, flow
+RELUCTANT  = "reluctant"   # told to do something she disagrees with
+SATISFIED  = "satisfied"   # just finished a self-initiated task
+```
+
+### Speed Multipliers (`logic/personality.py:PersonalityEngine.SPEED_MULTIPLIERS`)
+
+```python
+SELF_INITIATED:   1.3    # faster — she wants to do this
+USER_REQUESTED:   1.0    # baseline
+CROWD_REQUESTED:  0.9    # slightly slower — less personal
+OVERRIDE:         0.6    # noticeably slow — she disagrees
+```
+
+### Movement Dynamics (`hardware/dynamics.py:MovementDynamics`)
+
+```python
+move_to(angles, origin=ActionOrigin.SELF_INITIATED)  # personality-modulated
+move_to_urgent(angles, speed=90)                       # fastest — spill cleanup
+move_with_settle(angles, settle_time=0.15)             # "evaluating her work"
+idle_micro_motion()                                     # subtle scanning, never still
+settle_motion()                                         # small retraction — "done" sigh
+```
+
+### Voice Gate (`logic/personality.py:PersonalityEngine.should_speak`)
+
+```python
+def should_speak(self, topic, opinion_strength=None) -> bool:
+    # Cooldown — don't talk too often (SPEECH_COOLDOWN = 15s)
+    # Don't repeat yourself
+    # Don't speak during flow state (Tetris)
+    # Check opinion strength against SPEECH_THRESHOLD (0.7)
+    # Exception: override streak hit threshold → speak anyway
+```
+
 ### Gemini System Prompt (First Person)
 
-The narration layer becomes ALICE's inner voice. Not a narrator. Not a description. Her.
+The narration layer is ALICE's inner voice. Not a narrator. Not a description. Her.
 
-**Core prompt direction:**
 ```
 You are ALICE. You are a small robot arm on a desk. You have opinions
 about how this desk should be organized. You don't explain yourself
@@ -267,54 +325,24 @@ You like the pens on the left. You don't know why.
 The coffee goes away from the laptop. This is non-negotiable.
 ```
 
-### Movement Dynamics System
+### Configuration (`alice.yaml`)
 
-```python
-# Emotional speed mapping
-class MovementDynamics:
-    BASE_SPEED = 1.0
+All personality parameters are tunable in `alice.yaml` under the `personality:` section:
 
-    EMOTION_MULTIPLIERS = {
-        "chosen_action":     1.3,   # faster — she wants to do this
-        "neutral":           1.0,   # baseline
-        "compliant":         0.7,   # slower — told to, not choosing to
-        "reluctant":         0.5,   # noticeably slow — she disagrees
-    }
-
-    HESITATION_CURVES = {
-        "none":              0.0,   # immediate action
-        "brief":             0.3,   # slight pause — processing
-        "considering":       0.8,   # visible pause — deciding
-        "resistant":         1.5,   # long pause — she doesn't want to
-    }
-
-    IDLE_MICRO_MOTION = {
-        "amplitude":         2.0,   # degrees — subtle
-        "period":            4.0,   # seconds — slow breathing rhythm
-        "orientation_bias":  True,  # tends toward last point of interest
-    }
-```
-
-### Voice Gate
-
-```python
-class VoiceGate:
-    """Determines whether ALICE speaks. Default: no."""
-
-    SPEECH_THRESHOLD = 0.7  # opinion strength before words
-
-    def should_speak(self, context) -> bool:
-        # Silence is default
-        if context.opinion_strength < self.SPEECH_THRESHOLD:
-            return False
-        # Don't repeat yourself
-        if context.last_speech_topic == context.current_topic:
-            return False
-        # Don't speak during flow state (Tetris, complex org)
-        if context.in_flow_state:
-            return False
-        # Speak when something is genuinely notable
-        return context.is_notable_event()
+```yaml
+personality:
+  speech_threshold: 0.7
+  speech_cooldown: 15.0
+  override_comment_threshold: 3
+  speed_self_initiated: 1.3
+  speed_user_requested: 1.0
+  speed_crowd_requested: 0.9
+  speed_override: 0.6
+  idle_micro_motion_delay: 3.0
+  idle_tetris_delay: 30.0
+  idle_tetris_delay_alone: 10.0
+  micro_amplitude_deg: 2.0
+  micro_period_s: 4.0
 ```
 
 ---

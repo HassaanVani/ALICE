@@ -2,28 +2,26 @@
 
 ## What You're Building
 
-A booth with a robotic arm, 16 numbered blocks, an overhead camera, and a keyboard for Tetris. Behind it, a screen shows a rotating glass brain with neurons firing in real-time. The audience participates from their phones. A narrator commentates.
+A desk with a robotic arm, scattered real objects (mug, notebook, pens, phone), two cameras, and a keyboard for Tetris. Behind it, a screen shows ALICE's glass brain and dashboard. The audience participates from their phones. ALICE speaks for herself.
 
-**Booth flow**: Passive attractors (Auto Sort / Auto Tetris) draw people in from across the room. When someone stops, offer them the Puppeteer sandbox. When a crowd gathers, run the full 5-act Demo.
+**Booth flow**: ALICE is already playing Tetris when people approach — she's mid-game, not waiting. When someone stops, she notices (presence detection) and turns to them. When a crowd gathers, run the full 6-act Performance mode.
 
 ```
 ┌─────────────────────────────────────────────────┐
 │                  PROJECTION / TV                 │
-│            (Haptix — glass brain view)           │
+│             (Dashboard — glass brain +           │
+│              spatial map + personality)           │
 └─────────────────────────────────────────────────┘
 
-         ┌─────────────────────────┐
-         │     OVERHEAD CAMERA     │  ← mounted above, pointing down
-         └───────────┬─────────────┘
-                     │
-    ┌────────────────▼────────────────┐
-    │                                 │
-    │   [blocks]    🦾 ARM  [blocks]  │  ← workspace table
-    │                                 │
-    │   DROP ZONE       SORTED ZONE   │
-    │                                 │
-    │            ⌨️ KEYBOARD           │  ← for Auto Tetris (arm presses keys)
-    └─────────────────────────────────┘
+    ┌────────────────────────────────────┐
+    │                                    │
+    │  📸 (front camera, facing audience)│
+    │                                    │
+    │   ☕ 📓 🖊️  🦾 ARM  📱 📖       │  ← real desk objects
+    │              (📷 arm-mounted cam)  │
+    │                                    │
+    │            ⌨️ KEYBOARD              │  ← for Tetris (arm presses keys)
+    └────────────────────────────────────┘
 
     ┌──────────┐   ┌──────────┐   ┌──────────┐
     │  LAPTOP  │   │ MONITOR  │   │ TETRIS   │
@@ -31,7 +29,7 @@ A booth with a robotic arm, 16 numbered blocks, an overhead camera, and a keyboa
     │  + dash) │   │ operator)│   │(tetr.io) │
     └──────────┘   └──────────┘   └──────────┘
 
-    📱📱📱📱📱  ← audience phones on same WiFi
+    📱📱📱📱📱  ← audience phones (vote on desk layouts)
 ```
 
 ---

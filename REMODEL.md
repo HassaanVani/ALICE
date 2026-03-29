@@ -265,47 +265,52 @@ The 3D spatial model replaces the 2D minimap in the Spatial Preferences panel. T
 | "ALICE is considering her next move" | "hold on." |
 | "The audience has voted for..." | "...really?" |
 
-### What gets added
+### What was added (all implemented)
 
-#### 1. Presence Detection
-- MediaPipe face/pose detection on front-facing camera (reuses Haptix dependency — no new libraries)
-- Triggers idle → active transition with personality-appropriate delay
-- Lives in `vision/` as a new module, shares MediaPipe session with Haptix
+#### 1. Presence Detection ✓
+- `vision/presence.py` — MediaPipe face detection on front-facing camera
+- Triggers idle → active transition via `PersonalityEngine.set_presence()`
+- Distance estimation from face bbox size, "looking at desk" heuristic
 
-#### 2. Object Memory + 3D Spatial Map
-- Persistent storage of recognized objects + preferred 3D positions (centimeters, not pixels)
-- Spatial map built from arm-mounted camera via FK + monocular depth + Open3D TSDF fusion
-- Builds and refines over sessions — ALICE remembers where things were and where she prefers them
-- Tracks user overrides to update 3D preferences
-- JSON store for object memory, Open3D volume for spatial map
-- New modules: `vision/spatial_map.py`, `brain/object_memory.py`
+#### 2. Object Memory + 3D Spatial Map ✓
+- `logic/object_memory.py` — JSON persistence of recognized objects + preferred positions
+- `vision/spatial_map.py` — Open3D TSDF volume integration (FK pose + monocular depth)
+- `vision/monocular_depth.py` — Depth Anything v2 / MiDaS per-frame depth maps
+- Builds and refines over sessions — ALICE remembers where things were
 
-#### 3. Desk Layout Presets
-- Named configurations: "study", "creative", "clean", "default"
-- Each defines target positions for known object categories
-- Audience can request presets during Act 5
-- Configurable in `alice.yaml`
+#### 3. Desk Layout Presets ✓
+- `logic/desk_presets.py` — 4 built-in presets: studying, drawing, working, clean
+- Each defines target positions by YOLO label with priority and zone
+- Audience votes on presets during Act 5 via `audience_server.py`
+- Custom presets via `register_preset()`
 
-#### 4. Personality Engine
-- Central state machine managing opinion strength, preferences, movement dynamics
-- Inputs: object positions, user actions, override history, idle duration
-- Outputs: speed multiplier, hesitation duration, voice gate signal
-- See `PERSONALITY.md` for full architecture
-- New module: `logic/personality.py`
+#### 4. Personality Engine ✓
+- `logic/personality.py` — `PersonalityEngine` with `EmotionalState`, `ActionOrigin`, `ObjectPreference`
+- Inputs: object positions, user actions, override history, idle duration, presence
+- Outputs: speed multiplier, hesitation duration, voice gate signal, idle behavior
+- All parameters configurable in `alice.yaml` under `personality:`
 
-#### 5. Movement Dynamics
-- Wraps arm controller with emotional speed curves
-- Hesitation system (configurable pauses based on opinion strength)
-- Idle micro-movements (slow scanning, subtle orientation shifts)
-- Flow-state detection (Tetris, complex organization → smooth rhythmic motion)
-- New module: `hardware/dynamics.py`
+#### 5. Movement Dynamics ✓
+- `hardware/dynamics.py` — `MovementDynamics` wraps `ArmController`
+- Personality-driven speed, hesitation, micro-motion, settle, urgent moves
+- Idle micro-movements (sinusoidal drift on base joint, orient toward interest)
 
-#### 6. First-Person Voice
-- Rewritten Gemini system prompt (see `PERSONALITY.md`)
-- Voice gate integration — she speaks only when opinion strength exceeds threshold
-- Silence as explicit option (the system can choose not to generate)
-- Short response enforcement (8-word max in prompt)
-- Updated `narration.py` + `narration_prompts.py`
+#### 6. First-Person Voice ✓
+- Gemini system prompt rewritten for ALICE's first-person voice
+- Voice gate via `PersonalityEngine.should_speak()` — silence is default
+- Speech cooldown, topic deduplication, flow-state suppression
+- `narration.py` + `narration_prompts.py` updated
+
+#### 7. Additional Systems ✓
+- `logic/desk_organizer.py` — FSM for autonomous desk tidying (scan→plan→execute→verify)
+- `logic/wake_scan.py` — startup desk sweep with YOLO + depth + memory integration
+- `logic/tea_choreography.py` — 3-beat tea interaction (warning → override → "told you")
+- `logic/fist_bump.py` — gesture-triggered fist bump response
+- `logic/teaching.py` — "show ALICE where things go" guided learning
+- `modes/performance.py` — 6-act REMODEL demo arc runner
+- `vision/yolo_detector.py` — YOLO v8 for real desk object detection (17 classes)
+- `hardware/forward_kinematics.py` — DH-based FK with camera SE(3) pose
+- `hardware/gripper.py:ParallelGripper` — proportional gripper with personality-aware gripping
 
 ### What gets removed or hidden
 
@@ -377,49 +382,54 @@ The dashboard is already visible throughout the demo. But in Act 6, it fills the
 
 ## Implementation Phases
 
-### Phase 1: Narrative Foundation
+### Phase 1: Narrative Foundation ✓ COMPLETE
 *Reframe existing systems without major code changes.*
 
-- [ ] Rewrite `narration_prompts.py` — all first-person, short, dry
-- [ ] Update Gemini system prompt in `narration.py` — ALICE's voice
-- [ ] Restructure modes: merge Auto Tetris into Idle as personality behavior
-- [ ] Hide Calibrate from demo flow (setup-only)
-- [ ] Add idle micro-movements to arm controller
-- [ ] Add Tetris-as-idle trigger logic (idle timeout → drift to keyboard)
-- [ ] Write `logic/personality.py` skeleton — opinion strength, voice gate
-- [ ] Update `alice.yaml` with personality parameters
+- [x] Rewrite `narration_prompts.py` — all first-person, short, dry
+- [x] Update Gemini system prompt in `narration.py` — ALICE's voice
+- [x] Restructure modes: merge Auto Tetris into Idle as personality behavior
+- [x] Hide Calibrate from demo flow (setup-only)
+- [x] Add idle micro-movements to arm controller → `hardware/dynamics.py`
+- [x] Add Tetris-as-idle trigger logic (idle timeout → drift to keyboard) → `modes/idle.py`
+- [x] Write `logic/personality.py` — opinion strength, voice gate, emotional states
+- [x] Update `alice.yaml` with personality parameters
 
-### Phase 2: Intelligence Layer
+### Phase 2: Intelligence Layer ✓ COMPLETE
 *New capabilities that make ALICE feel aware.*
 
-- [ ] Camera refactor — dual-camera setup (arm-mounted + front-facing), deprecate overhead
-- [ ] Forward kinematics module — joint angles → camera 6DoF pose (SE(3) transform)
-- [ ] Monocular depth estimation integration (ZoeDepth or Depth Anything v2)
-- [ ] 3D spatial map pipeline (`vision/spatial_map.py`) — Open3D TSDF fusion from arm-cam + FK poses
-- [ ] Wake-up scan routine — arm sweep path that builds initial 3D map
-- [ ] Swap CNN block classifier → YOLO (ultralytics, pretrained COCO) for desk objects
-- [ ] Presence detection via MediaPipe face/pose on front-facing camera (`vision/presence.py`)
-- [ ] Object memory persistence in 3D coordinates (`brain/object_memory.py`)
-- [ ] Desk layout presets in config (3D target positions)
-- [ ] Personality engine — preference model, resistance thresholds (`logic/personality.py`)
-- [ ] Movement dynamics wrapper (`hardware/dynamics.py`)
-- [ ] Wire preference model into sort FSM → desk organization FSM
+- [x] Camera refactor — dual-camera (arm-mounted + front-facing), OVERHEAD alias → `vision/camera.py`
+- [x] Forward kinematics module — joint angles → SE(3) camera pose → `hardware/forward_kinematics.py`
+- [x] Monocular depth estimation (Depth Anything v2 / MiDaS) → `vision/monocular_depth.py`
+- [x] 3D spatial map pipeline — Open3D TSDF fusion → `vision/spatial_map.py`
+- [x] Wake-up scan routine — 6-waypoint desk sweep → `logic/wake_scan.py`
+- [x] YOLO swap — ultralytics COCO for desk objects → `vision/yolo_detector.py`
+- [x] Presence detection — MediaPipe face on front camera → `vision/presence.py`
+- [x] Object memory persistence — JSON across sessions → `logic/object_memory.py`
+- [x] Desk layout presets (studying, drawing, working, clean) → `logic/desk_presets.py`
+- [x] Personality engine — preferences, resistance, emotional states → `logic/personality.py`
+- [x] Movement dynamics wrapper — speed/hesitation/micro-motion → `hardware/dynamics.py`
+- [x] Desk organization FSM (scan → plan → execute) → `logic/desk_organizer.py`
+- [x] Parallel gripper driver → `hardware/gripper.py:ParallelGripper`
 
-### Phase 3: Experience Design
+### Phase 3: Experience Design ✓ COMPLETE
 *The demo arc and audience-facing systems.*
 
-- [ ] Performance mode — single-arc demo runner with act sequencing
-- [ ] Tea spill interaction choreography (partially scripted, partially emergent)
-- [ ] Audience server reframe — desk layout voting, task requests
-- [ ] Teaching mode reframe — Haptix as "show ALICE a routine"
-- [ ] Dashboard redesign — glassmorphism components, new layout
+- [x] Performance mode — 6-act arc runner → `modes/performance.py`
+- [x] Tea spill choreography (3-beat: warning → override → "told you") → `logic/tea_choreography.py`
+- [x] Audience server reframe — preset voting + desk phases → `audience_server.py`
+- [x] Teaching mode reframe — "show ALICE where things go" → `logic/teaching.py`
+- [x] Fist bump interaction → `logic/fist_bump.py`
+- [x] Dashboard redesign plan → `dashboard/REDESIGN.md`
+- [ ] Dashboard glassmorphism implementation (planned, see `dashboard/REDESIGN.md`)
 - [ ] Glass brain visual polish for keynote moment
-- [ ] Object memory panel, 3D spatial map view (Three.js rendering of ALICE's world model)
+- [ ] Object memory panel + 3D spatial map Three.js view
 - [ ] Activity feed + ALICE voice output display
 
 ### Phase 4: Polish & Choreography
 *Making it performance-ready.*
 
+- [x] Run full test suite — 537 tests passing
+- [x] Update README.md for new project identity
 - [ ] End-to-end demo rehearsal and timing
 - [ ] Movement personality tuning (speed curves, hesitation feel)
 - [ ] Gemini prompt iteration (voice consistency, brevity enforcement)
@@ -427,35 +437,33 @@ The dashboard is already visible throughout the demo. But in Act 6, it fills the
 - [ ] Audience interaction UX (mobile-friendly voting interface)
 - [ ] Branding: logo, typography, color system
 - [ ] Fallback behaviors for hardware issues during live demo
-- [ ] Run full test suite, update tests for new modules
-- [ ] Update README.md for new project identity
 
 ### Phase 5: Extended Features (Post-Demo)
 *Nice-to-haves if time allows.*
 
-- [ ] Multi-session personality continuity (ALICE remembers across demos)
+- [x] Multi-session personality continuity — `logic/object_memory.py` persists across sessions
 - [ ] Adaptive Tetris difficulty (she gets better over time)
 - [ ] Voice output via speaker (TTS for "fine." hits different out loud)
-- [ ] Recording system → "ALICE learns a routine from demonstration"
+- [x] Teaching system → "ALICE learns from demonstration" via `logic/teaching.py`
 - [ ] Mobile companion app concept (check on ALICE remotely)
 
 ---
 
-## Open Questions
+## Open Questions (Updated)
 
-1. **Object detection model:** YOLO (ultralytics, COCO pretrained) is the current plan. Covers most desk objects out-of-the-box. May need fine-tuning for uncommon items (specific tools, custom objects). Evaluate whether stock COCO classes are sufficient or if a small fine-tuning pass is needed.
+1. ~~**Object detection model:**~~ **Resolved.** YOLO v8 nano (ultralytics, COCO pretrained) implemented in `vision/yolo_detector.py`. 17 desk-relevant COCO classes filtered via `DESK_OBJECTS` dict. Stock classes cover cup, laptop, phone, book, bottle, keyboard, scissors, and more. Fine-tuning deferred — stock coverage is sufficient for the demo.
 
-2. **3D reconstruction approach:** TSDF fusion via Open3D is the practical choice. Gaussian splatting (gsplat/nerfstudio) produces photorealistic results for the dashboard but is heavier to run. Decision: start with Open3D TSDF, evaluate gaussian splatting as a Phase 4 polish upgrade if GPU budget allows.
+2. ~~**3D reconstruction approach:**~~ **Resolved.** Open3D TSDF implemented in `vision/spatial_map.py`. Gaussian splatting remains a Phase 4 upgrade option.
 
-3. **Voice output modality:** Text on dashboard only? TTS through speaker? Both? TTS adds presence but risks breaking the "she speaks rarely" principle if the voice isn't right.
+3. **Voice output modality:** Text on dashboard + pyttsx3 TTS available. Decision on speaker output deferred to Phase 4 rehearsals.
 
-4. **Choreography vs. emergence:** How much of the demo should be scripted vs. driven by the personality engine? More scripted = reliable but rigid. More emergent = alive but risky for live demo.
+4. ~~**Choreography vs. emergence:**~~ **Resolved.** Hybrid approach implemented. Tea choreography (`logic/tea_choreography.py`) is partially scripted, partially driven by personality engine opinion strength. Performance mode (`modes/performance.py`) sequences the 6 acts but individual interactions within acts are emergent.
 
-5. **Audience interaction platform:** Keep WebSocket-based? Switch to something more accessible (QR code → mobile web page → vote)?
+5. **Audience interaction platform:** WebSocket-based, retained. Audience page at `dashboard/src/pages/Audience.jsx`. Preset voting added alongside block voting. QR code → mobile web remains a Phase 4 UX task.
 
-6. **Branding depth:** Is "ALICE" the final name or does the Detroit: Become Human connection need to be obscured for IP reasons? Does she need a logo, a typeface, a visual identity beyond the dashboard?
+6. **Branding depth:** ALICE name kept. Logo/typeface deferred to Phase 4.
 
-7. **Arm-mounted camera viewpoint:** Moving camera means constantly shifting perspective. YOLO handles varied angles, but the 3D map needs consistent quality. Evaluate whether the wake-up scan produces sufficient coverage, or if periodic re-scan routines are needed during operation.
+7. ~~**Arm-mounted camera viewpoint:**~~ **Resolved.** Wake-up scan (`logic/wake_scan.py`) sweeps 6 waypoints to build initial coverage. Ongoing integration during normal operation refines the map. YOLO handles varied angles well.
 
 ---
 
