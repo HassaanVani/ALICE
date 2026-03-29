@@ -18,7 +18,8 @@ from logic import ChimpSortFSM, SortState, TetrisAgent, PersonalityEngine, Actio
 from hardware.dynamics import MovementDynamics
 from server import TensorStreamServer
 from modes import (ModeContext, DemoState, IdleRunner, AutoSortRunner,
-                   AutoTetrisRunner, DemoRunner, CalibrateRunner, PuppeteerRunner)
+                   AutoTetrisRunner, DemoRunner, CalibrateRunner, PuppeteerRunner,
+                   PerformanceRunner)
 from puppet_server import PuppetServer
 from audience_server import AudienceServer
 from narration import NarrationService
@@ -39,6 +40,7 @@ class Mode(Enum):
     DEMO = "demo"
     CALIBRATE = "calibrate"
     PUPPETEER = "puppeteer"
+    PERFORMANCE = "performance"
 
 
 class ALICE:
@@ -317,6 +319,7 @@ class ALICE:
         Mode.DEMO: DemoRunner,
         Mode.CALIBRATE: CalibrateRunner,
         Mode.PUPPETEER: PuppeteerRunner,
+        Mode.PERFORMANCE: PerformanceRunner,
     }
 
     def _build_context(self) -> ModeContext:
@@ -412,7 +415,7 @@ class ALICE:
 async def main():
     parser = argparse.ArgumentParser(description="A.L.I.C.E. - Adaptive Learning Interface for Cognitive Exploration")
     parser.add_argument("--config", type=str, default=None, help="Path to alice.yaml config file")
-    parser.add_argument("--mode", type=str, choices=["idle", "auto_sort", "auto_tetris", "demo", "calibrate", "puppeteer"], default=None)
+    parser.add_argument("--mode", type=str, choices=["idle", "auto_sort", "auto_tetris", "demo", "calibrate", "puppeteer", "performance"], default=None)
     parser.add_argument("--simulate", action="store_true", default=None)
     parser.add_argument("--ws-port", type=int, default=None)
     parser.add_argument("--arm-port", type=str, default=None, help="Serial port for arm controller")

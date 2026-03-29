@@ -7,6 +7,16 @@ from .personality import (
     PersonalityEngine, PersonalityState, EmotionalState,
     ActionOrigin, ObjectPreference,
 )
+from .object_memory import ObjectMemory, ObjectRecord, DeskSnapshot
+from .desk_presets import (
+    DeskPreset, ObjectSlot, PRESETS,
+    get_preset, list_presets, register_preset,
+)
+from .desk_organizer import DeskOrganizer, OrgState, OrgPlan, MoveCommand
+from .wake_scan import WakeScanRoutine, ScanWaypoint, ScanResult
+from .tea_choreography import TeaChoreography
+from .fist_bump import FistBumpInteraction
+from .teaching import TeachingSession
 
 try:
     from .sort_env import ChimpSortEnv

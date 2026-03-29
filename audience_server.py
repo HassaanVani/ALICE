@@ -1,4 +1,4 @@
-"""Audience participation server — live state, block voting, tilt, reactions."""
+"""Audience participation server — live state, voting (blocks + desk presets), tilt, reactions."""
 
 import asyncio
 import json
@@ -32,6 +32,12 @@ PHASE_INFO = {
     "demo":                {"label": "Demo",           "desc": "Live 5-act show in progress",          "interactive": False},
     "calibrate":           {"label": "Calibrating",    "desc": "System calibration",                   "interactive": False, "hidden": True},
     "puppeteer":           {"label": "Puppeteer",      "desc": "A volunteer controls the arm",         "interactive": False},
+    # New desk-assistant phases
+    "desk_scan":           {"label": "Scanning",       "desc": "ALICE is looking at the desk",         "interactive": False},
+    "desk_organize":       {"label": "Organize!",      "desc": "Vote for a desk layout!",              "interactive": True},
+    "desk_executing":      {"label": "Tidying",        "desc": "ALICE is organizing the desk",         "interactive": False},
+    "desk_opinions":       {"label": "Opinions",       "desc": "ALICE has thoughts about this",        "interactive": True},
+    "performance":         {"label": "Show",            "desc": "Meet ALICE — she lives on this desk",  "interactive": False},
 }
 
 
@@ -51,6 +57,12 @@ class AudienceServer:
         self._client_votes: Dict[str, int] = {}                      # client_id -> block_id
         self._vote_round: int = 0
         self._last_winner: Optional[dict] = None                      # {block_id, voter_count, round}
+
+        # ── Preset voting (desk organization) ──
+        self._preset_votes: Dict[str, Set[str]] = defaultdict(set)  # preset_name -> {client_ids}
+        self._client_preset_votes: Dict[str, str] = {}               # client_id -> preset_name
+        self._preset_vote_round: int = 0
+        self._last_preset_winner: Optional[dict] = None
 
         # ── Tilt aggregation ──
         self._tilts: Dict[str, Tuple[float, float]] = {}  # client_id -> (beta, gamma)
@@ -172,6 +184,11 @@ class AudienceServer:
                 if isinstance(block_id, int):
                     await self._handle_block_vote(client_id, block_id, websocket)
 
+            elif msg_type == "vote_preset":
+                preset_name = data.get("preset")
+                if isinstance(preset_name, str) and preset_name:
+                    await self._handle_preset_vote(client_id, preset_name, websocket)
+
             elif msg_type == "tilt":
                 beta = float(data.get("beta", 0))
                 gamma = float(data.get("gamma", 0))
@@ -222,6 +239,72 @@ class AudienceServer:
             "type": "reaction",
             "emoji": emoji,
             "count": len(self.clients),  # rough "energy" signal
+        })
+
+    # ── Preset voting (desk organization) ─────────────────────────
+
+    async def _handle_preset_vote(self, client_id: str, preset_name: str,
+                                   websocket: WebSocketServerProtocol) -> None:
+        """Handle a client voting for a desk layout preset."""
+        if client_id in self._client_preset_votes:
+            old = self._client_preset_votes[client_id]
+            self._preset_votes[old].discard(client_id)
+
+        self._client_preset_votes[client_id] = preset_name
+        self._preset_votes[preset_name].add(client_id)
+
+        await self._safe_send(websocket, {
+            "type": "preset_vote_ack",
+            "preset": preset_name,
+        })
+        await self._broadcast_preset_votes()
+
+    def get_winning_preset(self) -> Optional[str]:
+        """Return the preset name with the most votes, or None."""
+        if not self._preset_votes:
+            return None
+        winner = max(self._preset_votes.items(), key=lambda kv: len(kv[1]))
+        name, voters = winner
+        return name if len(voters) > 0 else None
+
+    def get_preset_vote_results(self) -> dict:
+        """Return {preset_name: vote_count} for all presets with votes."""
+        return {name: len(voters) for name, voters in self._preset_votes.items() if voters}
+
+    def consume_preset_votes(self) -> Optional[dict]:
+        """Consume the winning preset vote — returns winner info and resets."""
+        winner = self.get_winning_preset()
+        if winner is None:
+            return None
+
+        voter_count = len(self._preset_votes[winner])
+        result = {
+            "preset": winner,
+            "voter_count": voter_count,
+            "round": self._preset_vote_round,
+        }
+
+        self._last_preset_winner = result
+        self._preset_votes.clear()
+        self._client_preset_votes.clear()
+        self._preset_vote_round += 1
+        return result
+
+    async def _broadcast_preset_votes(self) -> None:
+        await self._broadcast({
+            "type": "preset_vote_update",
+            "votes": self.get_preset_vote_results(),
+            "leading": self.get_winning_preset(),
+        })
+
+    async def broadcast_preset_result(self, preset_name: str, accepted: bool,
+                                       reason: str = "") -> None:
+        """Tell the audience whether ALICE accepted or refused their preset choice."""
+        await self._broadcast({
+            "type": "preset_result",
+            "preset": preset_name,
+            "accepted": accepted,
+            "reason": reason,
         })
 
     # ── State helpers ────────────────────────────────────────────────

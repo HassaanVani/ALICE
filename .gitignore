@@ -11,6 +11,7 @@ venv/
 .logs/
 .pids/
 recordings/
+data/
 dist/
 .DS_Store
 .python-version

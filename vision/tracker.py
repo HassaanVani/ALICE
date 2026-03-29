@@ -1,9 +1,14 @@
-"""Real-time block tracking with Kalman filter and Hungarian algorithm association."""
+"""Real-time object tracking with Kalman filter and greedy association.
+
+Supports both legacy BlockData (ArUco markers, block_id: int) and new
+Detection objects (YOLO, label: str). The tracker uses spatial proximity
+and label/ID matching for frame-to-frame association.
+"""
 
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -26,6 +31,7 @@ class TrackedBlock:
     velocity_y: float = 0.0
     confidence: float = 1.0
     frames_since_seen: int = 0
+    label: str = ""  # YOLO label (empty for ArUco-only tracking)
     _kalman: cv2.KalmanFilter = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -59,21 +65,54 @@ class TrackedBlock:
 
     def predict(self) -> Tuple[float, float]:
         predicted = self._kalman.predict()
-        self.filtered_x = float(predicted[0])
-        self.filtered_y = float(predicted[1])
-        self.velocity_x = float(predicted[2])
-        self.velocity_y = float(predicted[3])
+        self.filtered_x = float(predicted[0].item() if hasattr(predicted[0], 'item') else predicted[0])
+        self.filtered_y = float(predicted[1].item() if hasattr(predicted[1], 'item') else predicted[1])
+        self.velocity_x = float(predicted[2].item() if hasattr(predicted[2], 'item') else predicted[2])
+        self.velocity_y = float(predicted[3].item() if hasattr(predicted[3], 'item') else predicted[3])
         return self.filtered_x, self.filtered_y
 
     def update(self, x: float, y: float, confidence: float):
         measurement = np.array([x, y], dtype=np.float32)
         corrected = self._kalman.correct(measurement)
-        self.filtered_x = float(corrected[0])
-        self.filtered_y = float(corrected[1])
-        self.velocity_x = float(corrected[2])
-        self.velocity_y = float(corrected[3])
+        self.filtered_x = float(corrected[0].item() if hasattr(corrected[0], 'item') else corrected[0])
+        self.filtered_y = float(corrected[1].item() if hasattr(corrected[1], 'item') else corrected[1])
+        self.velocity_x = float(corrected[2].item() if hasattr(corrected[2], 'item') else corrected[2])
+        self.velocity_y = float(corrected[3].item() if hasattr(corrected[3], 'item') else corrected[3])
         self.confidence = confidence
         self.frames_since_seen = 0
+
+    @property
+    def speed(self) -> float:
+        """Pixels per frame."""
+        return (self.velocity_x ** 2 + self.velocity_y ** 2) ** 0.5
+
+
+def _det_center_x(det) -> float:
+    return float(det.center_x)
+
+
+def _det_center_y(det) -> float:
+    return float(det.center_y)
+
+
+def _det_confidence(det) -> float:
+    return float(det.confidence)
+
+
+def _det_label(det) -> str:
+    """Extract label from either BlockData or Detection."""
+    if hasattr(det, "label") and det.label:
+        return det.label
+    if hasattr(det, "block_id"):
+        return str(det.block_id)
+    return ""
+
+
+def _det_block_id(det) -> int:
+    """Extract integer block_id from either type. Returns -1 for non-block objects."""
+    if hasattr(det, "block_id"):
+        return int(det.block_id)
+    return -1
 
 
 class BlockTracker:
@@ -86,10 +125,12 @@ class BlockTracker:
     def active_tracks(self) -> List[TrackedBlock]:
         return [t for t in self._tracks.values() if t.frames_since_seen <= MAX_MISSING_FRAMES]
 
-    def update(self, detections: List[BlockData]) -> List[TrackedBlock]:
+    def update(self, detections: list) -> List[TrackedBlock]:
         """Update tracker with new detections, return tracked results.
 
-        Thread-safe: all Kalman predict/correct calls are serialized by _lock.
+        Accepts List[BlockData] or List[Detection] (duck-typed on center_x,
+        center_y, confidence). Thread-safe: all Kalman predict/correct calls
+        are serialized by _lock.
         """
         with self._lock:
             # Predict step for all existing tracks
@@ -120,14 +161,18 @@ class BlockTracker:
             cost = np.full((n_tracks, n_dets), ASSOCIATION_THRESHOLD * 2, dtype=np.float32)
             for i, track in enumerate(tracks_list):
                 for j, det in enumerate(detections):
-                    dist = np.sqrt((track.filtered_x - det.center_x) ** 2 +
-                                   (track.filtered_y - det.center_y) ** 2)
-                    # Penalize block_id mismatch to prefer same-ID associations
-                    if track.block_id != det.block_id:
+                    dist = np.sqrt(
+                        (track.filtered_x - _det_center_x(det)) ** 2
+                        + (track.filtered_y - _det_center_y(det)) ** 2
+                    )
+                    # Penalize label/id mismatch to prefer same-object associations
+                    det_label = _det_label(det)
+                    track_label = track.label or str(track.block_id)
+                    if track_label != det_label:
                         dist += ASSOCIATION_THRESHOLD * 0.5
                     cost[i, j] = dist
 
-            # Greedy matching (good enough for 16 blocks)
+            # Greedy matching
             matched_tracks = set()
             matched_dets = set()
 
@@ -139,11 +184,12 @@ class BlockTracker:
                 i, j = idx
 
                 tracks_list[i].update(
-                    detections[j].center_x,
-                    detections[j].center_y,
-                    detections[j].confidence
+                    _det_center_x(detections[j]),
+                    _det_center_y(detections[j]),
+                    _det_confidence(detections[j]),
                 )
-                tracks_list[i].block_id = detections[j].block_id
+                tracks_list[i].block_id = _det_block_id(detections[j])
+                tracks_list[i].label = _det_label(detections[j])
                 matched_tracks.add(i)
                 matched_dets.add(j)
 
@@ -158,13 +204,28 @@ class BlockTracker:
             self._prune_lost_tracks()
             return self.active_tracks
 
-    def _create_track(self, det: BlockData) -> TrackedBlock:
+    def get_track_by_label(self, label: str) -> Optional[TrackedBlock]:
+        """Find the most confident active track with a given label."""
+        matches = [
+            t for t in self.active_tracks
+            if t.label == label
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda t: t.confidence)
+
+    def get_tracks_by_label(self, label: str) -> List[TrackedBlock]:
+        """Find all active tracks with a given label."""
+        return [t for t in self.active_tracks if t.label == label]
+
+    def _create_track(self, det) -> TrackedBlock:
         track = TrackedBlock(
-            block_id=det.block_id,
+            block_id=_det_block_id(det),
             track_id=self._next_track_id,
-            filtered_x=float(det.center_x),
-            filtered_y=float(det.center_y),
-            confidence=det.confidence,
+            filtered_x=float(_det_center_x(det)),
+            filtered_y=float(_det_center_y(det)),
+            confidence=_det_confidence(det),
+            label=_det_label(det),
         )
         self._tracks[self._next_track_id] = track
         self._next_track_id += 1
@@ -181,3 +242,7 @@ class BlockTracker:
     def reset(self):
         self._tracks.clear()
         self._next_track_id = 1
+
+
+# Alias — new code should use ObjectTracker, old code keeps working
+ObjectTracker = BlockTracker
