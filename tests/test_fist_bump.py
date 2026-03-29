@@ -196,6 +196,176 @@ class TestFistBumpLegacy:
         assert bump._hand_detector is None
 
 
+class TestFistBumpInitiation:
+    def test_should_initiate_good_mood(self):
+        from logic.personality import PersonalityEngine, EmotionalState
+        from vision.presence import PresenceInfo
+
+        fb = FistBumpInteraction(cooldown_s=0, initiate_cooldown_s=0)
+        personality = PersonalityEngine()
+        personality._state.overall_mood = 0.85
+        personality._state.emotional_state = EmotionalState.SATISFIED
+        presence = PresenceInfo(detected=True, closest_distance=40.0, looking_at_desk=True)
+
+        # With SATISFIED state, 30% chance — run enough times to confirm it can trigger
+        triggered = any(
+            fb.should_initiate(personality=personality, presence_info=presence)
+            for _ in range(50)
+        )
+        assert triggered is True
+
+    def test_should_not_initiate_bad_mood(self):
+        from logic.personality import PersonalityEngine, EmotionalState
+        from vision.presence import PresenceInfo
+
+        fb = FistBumpInteraction(cooldown_s=0, initiate_cooldown_s=0)
+        personality = PersonalityEngine()
+        personality._state.overall_mood = 0.3
+        personality._state.emotional_state = EmotionalState.ANNOYED
+        presence = PresenceInfo(detected=True, closest_distance=40.0, looking_at_desk=True)
+
+        results = [
+            fb.should_initiate(personality=personality, presence_info=presence)
+            for _ in range(50)
+        ]
+        assert not any(results)
+
+    def test_should_not_initiate_no_presence(self):
+        from logic.personality import PersonalityEngine, EmotionalState
+
+        fb = FistBumpInteraction(cooldown_s=0, initiate_cooldown_s=0)
+        personality = PersonalityEngine()
+        personality._state.overall_mood = 0.9
+        personality._state.emotional_state = EmotionalState.SATISFIED
+
+        assert fb.should_initiate(personality=personality, presence_info=None) is False
+
+    def test_should_not_initiate_in_flow(self):
+        from logic.personality import PersonalityEngine, EmotionalState
+        from vision.presence import PresenceInfo
+
+        fb = FistBumpInteraction(cooldown_s=0, initiate_cooldown_s=0)
+        personality = PersonalityEngine()
+        personality._state.overall_mood = 0.9
+        personality._state.emotional_state = EmotionalState.SATISFIED
+        personality._state.is_in_flow = True
+        presence = PresenceInfo(detected=True, closest_distance=40.0, looking_at_desk=True)
+
+        results = [
+            fb.should_initiate(personality=personality, presence_info=presence)
+            for _ in range(50)
+        ]
+        assert not any(results)
+
+    def test_backs_off_after_left_hanging(self):
+        from logic.personality import PersonalityEngine, EmotionalState
+        from vision.presence import PresenceInfo
+
+        fb = FistBumpInteraction(cooldown_s=0, initiate_cooldown_s=0)
+        fb._times_left_hanging = 3  # she's been burned
+        personality = PersonalityEngine()
+        personality._state.overall_mood = 0.9
+        personality._state.emotional_state = EmotionalState.SATISFIED
+        presence = PresenceInfo(detected=True, closest_distance=40.0, looking_at_desk=True)
+
+        results = [
+            fb.should_initiate(personality=personality, presence_info=presence)
+            for _ in range(50)
+        ]
+        assert not any(results)
+
+    def test_initiate_cooldown(self):
+        fb = FistBumpInteraction(initiate_cooldown_s=60)
+        assert fb.initiate_on_cooldown is False
+        fb._last_initiate_time = time.time()
+        assert fb.initiate_on_cooldown is True
+
+    @pytest.mark.asyncio
+    async def test_initiate_reciprocated(self):
+        fb = FistBumpInteraction(cooldown_s=0, initiate_cooldown_s=0)
+        arm = MagicMock()
+        arm.move_to = MagicMock(return_value=True)
+
+        # Mock camera that returns a frame with a simulated fist
+        detector = fb.get_or_create_detector()
+        detector._simulate = True
+        detector._fist_hold_start["Right"] = time.time() - 2.0
+
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        result = await fb.initiate_bump(
+            camera_getter=lambda: frame,
+            arm=arm,
+        )
+        assert result is True
+        assert fb._times_reciprocated == 1
+        assert fb.bump_count == 1
+
+    @pytest.mark.asyncio
+    async def test_initiate_left_hanging(self):
+        fb = FistBumpInteraction(cooldown_s=0, initiate_cooldown_s=0)
+        arm = MagicMock()
+        arm.move_to = MagicMock(return_value=True)
+
+        # Camera returns frames but no fist detected (detector sim returns fist,
+        # so we need to disable it and return empty detections)
+        detector = fb.get_or_create_detector()
+        detector._simulate = False
+        # Override detect_fist_bump to return None (no reciprocation)
+        detector.detect_fist_bump = MagicMock(return_value=None)
+
+        result = await fb.initiate_bump(
+            camera_getter=lambda: np.zeros((720, 1280, 3), dtype=np.uint8),
+            arm=arm,
+            wait_timeout=0.3,  # short timeout for test
+        )
+        assert result is False
+        assert fb._times_left_hanging == 1
+
+    @pytest.mark.asyncio
+    async def test_left_hanging_mood_dip(self):
+        from logic.personality import PersonalityEngine
+
+        fb = FistBumpInteraction(cooldown_s=0, initiate_cooldown_s=0)
+        personality = PersonalityEngine()
+        personality._state.overall_mood = 0.7
+        arm = MagicMock()
+        arm.move_to = MagicMock(return_value=True)
+
+        detector = fb.get_or_create_detector()
+        detector._simulate = False
+        detector.detect_fist_bump = MagicMock(return_value=None)
+
+        await fb.initiate_bump(
+            camera_getter=lambda: np.zeros((720, 1280, 3), dtype=np.uint8),
+            arm=arm,
+            personality=personality,
+            wait_timeout=0.3,
+        )
+        assert personality._state.overall_mood < 0.7
+
+    @pytest.mark.asyncio
+    async def test_reciprocated_mood_boost(self):
+        from logic.personality import PersonalityEngine, EmotionalState
+
+        fb = FistBumpInteraction(cooldown_s=0, initiate_cooldown_s=0)
+        personality = PersonalityEngine()
+        personality._state.overall_mood = 0.5
+        arm = MagicMock()
+        arm.move_to = MagicMock(return_value=True)
+
+        detector = fb.get_or_create_detector()
+        detector._simulate = True
+        detector._fist_hold_start["Right"] = time.time() - 2.0
+
+        await fb.initiate_bump(
+            camera_getter=lambda: np.zeros((720, 1280, 3), dtype=np.uint8),
+            arm=arm,
+            personality=personality,
+        )
+        assert personality._state.overall_mood > 0.5
+        assert personality._state.emotional_state == EmotionalState.SATISFIED
+
+
 class TestFistBumpProperties:
     def test_on_cooldown(self):
         fb = FistBumpInteraction(cooldown_s=60)
@@ -206,3 +376,7 @@ class TestFistBumpProperties:
     def test_bump_count_starts_zero(self):
         fb = FistBumpInteraction()
         assert fb.bump_count == 0
+
+    def test_times_left_hanging_starts_zero(self):
+        fb = FistBumpInteraction()
+        assert fb.times_left_hanging == 0

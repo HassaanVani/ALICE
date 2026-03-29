@@ -54,10 +54,13 @@ class IdleRunner(ModeRunner):
             if frame is not None and not self.ctx.inference.is_frozen:
                 self.ctx.inference.predict(frame)
 
-            # --- Fist bump detection (runs on front camera when someone is close) ---
+            # --- Fist bump (reactive + initiated) ---
             front_frame = self.ctx.cameras.get_frame(CameraRole.FRONT_FACING)
+            bump_happened = False
+
             if front_frame is not None and not fist_bump.on_cooldown:
-                bumped = await fist_bump.check_and_respond(
+                # Reactive: check if someone is offering a fist bump
+                bump_happened = await fist_bump.check_and_respond(
                     front_frame,
                     arm=self.ctx.arm,
                     dynamics=self.ctx.dynamics,
@@ -65,17 +68,41 @@ class IdleRunner(ModeRunner):
                     narration=self.ctx.narration,
                     state_manager=self.ctx.state_manager,
                 )
-                if bumped:
-                    # After a fist bump, pause Tetris if active — she's socializing
-                    if tetris_active:
-                        await self._stop_tetris(tetris_controller)
-                        tetris_active = False
-                        tetris_controller = None
-                        if self.ctx.personality is not None:
-                            self.ctx.personality.on_interrupt_from_tetris()
-                    # Skip the rest of this tick
-                    await asyncio.sleep(self.ctx.config.timing.idle_loop_s)
-                    continue
+
+            if not bump_happened and not fist_bump.initiate_on_cooldown:
+                # Initiated: maybe ALICE offers a fist bump
+                from vision.presence import PresenceDetector, PresenceInfo
+                # Build a quick presence check from front camera availability
+                presence = PresenceInfo(
+                    detected=front_frame is not None,
+                    closest_distance=50.0 if front_frame is not None else float("inf"),
+                    looking_at_desk=True,
+                )
+                if fist_bump.should_initiate(
+                    personality=self.ctx.personality,
+                    presence_info=presence,
+                ):
+                    front_getter = lambda: self.ctx.cameras.get_frame(CameraRole.FRONT_FACING)
+                    bump_happened = await fist_bump.initiate_bump(
+                        camera_getter=front_getter,
+                        arm=self.ctx.arm,
+                        dynamics=self.ctx.dynamics,
+                        personality=self.ctx.personality,
+                        narration=self.ctx.narration,
+                        state_manager=self.ctx.state_manager,
+                    )
+
+            if bump_happened:
+                # After a fist bump, pause Tetris if active — she's socializing
+                if tetris_active:
+                    await self._stop_tetris(tetris_controller)
+                    tetris_active = False
+                    tetris_controller = None
+                    if self.ctx.personality is not None:
+                        self.ctx.personality.on_interrupt_from_tetris()
+                # Skip the rest of this tick
+                await asyncio.sleep(self.ctx.config.timing.idle_loop_s)
+                continue
 
             # Idle behaviors
             if behavior == "tetris" and not tetris_active:

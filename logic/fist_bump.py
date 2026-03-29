@@ -1,14 +1,22 @@
-"""Fist bump interaction — ALICE sees a fist and responds.
+"""Fist bump interaction — ALICE sees a fist and responds. Or offers one herself.
 
-Uses the HandGestureDetector to detect a closed fist offered toward the arm.
-When confident the gesture is a fist bump offer (stable fist, held for >0.4s,
-positioned toward the desk), ALICE extends her arm to meet it.
+Two modes:
 
-The response is personality-driven:
-- If ALICE is content or satisfied, she responds quickly and enthusiastically
-- If she's annoyed (been overridden a lot), she still responds but with a delay
-- After a bump, her mood lifts — it's a positive social interaction
-- She gets a brief SATISFIED emotional state
+**Reactive:** Uses the HandGestureDetector to detect a closed fist offered toward
+the arm. When confident the gesture is a fist bump offer (stable fist, held for
+>0.4s), ALICE extends her arm to meet it.
+
+**Initiated:** When ALICE is in a good mood and someone is nearby, she may extend
+her arm to offer a fist bump. She then watches for reciprocation — if the person
+bumps back, mood boost. If she gets left hanging, she retracts with a subtle
+disappointment beat (slower retract, tiny mood dip). Getting left hanging is
+a real personality moment.
+
+Triggers for ALICE-initiated bumps:
+- Just finished a task she's proud of (SATISFIED state)
+- Someone new arrives while she's in a good mood (mood > 0.65)
+- After a particularly good Tetris session
+- Random chance when idle + someone present (weighted by mood)
 
 The arm aims toward the detected fist position rather than a fixed angle,
 so the bump feels like ALICE is actually meeting the person's hand.
@@ -17,6 +25,7 @@ so the bump feels like ALICE is actually meeting the person's hand.
 import asyncio
 import logging
 import math
+import random
 import time
 from typing import Callable, Optional, Tuple
 
@@ -50,6 +59,7 @@ class FistBumpInteraction:
         cooldown_s: float = 8.0,
         offer_confidence_threshold: float = 0.7,
         hold_required_s: float = 0.4,
+        initiate_cooldown_s: float = 45.0,
     ):
         self._cooldown = cooldown_s
         self._offer_threshold = offer_confidence_threshold
@@ -58,6 +68,12 @@ class FistBumpInteraction:
         self._bump_count: int = 0
         self._hand_detector = None
 
+        # Initiation state
+        self._initiate_cooldown = initiate_cooldown_s
+        self._last_initiate_time: float = 0.0
+        self._times_left_hanging: int = 0
+        self._times_reciprocated: int = 0
+
     @property
     def bump_count(self) -> int:
         return self._bump_count
@@ -65,6 +81,14 @@ class FistBumpInteraction:
     @property
     def on_cooldown(self) -> bool:
         return time.time() - self._last_bump_time < self._cooldown
+
+    @property
+    def initiate_on_cooldown(self) -> bool:
+        return time.time() - self._last_initiate_time < self._initiate_cooldown
+
+    @property
+    def times_left_hanging(self) -> int:
+        return self._times_left_hanging
 
     # --- Detection ---
 
@@ -253,6 +277,210 @@ class FistBumpInteraction:
                 personality.record_speech("fist_bump")
 
         return True
+
+    # --- ALICE-initiated fist bumps ---
+
+    def should_initiate(self, personality=None, presence_info=None) -> bool:
+        """Decide whether ALICE should offer a fist bump right now.
+
+        She initiates when:
+        - Someone is present and close (< 60cm)
+        - She's not on cooldown
+        - She's in a good mood (> 0.6) or just finished something (SATISFIED)
+        - Random chance weighted by mood (higher mood = more likely)
+        - She hasn't been left hanging too many times recently
+
+        She won't initiate when:
+        - She's annoyed or reluctant
+        - She's in flow state (Tetris)
+        - No one is around
+        - She's been left hanging 3+ times (she takes the hint)
+        """
+        if self.on_cooldown or self.initiate_on_cooldown:
+            return False
+
+        if presence_info is None or not presence_info.detected:
+            return False
+
+        if presence_info.closest_distance > 60.0:
+            return False
+
+        if personality is None:
+            return False
+
+        from logic.personality import EmotionalState
+
+        # Don't initiate if she's upset or in the zone
+        if personality.emotional_state in (
+            EmotionalState.ANNOYED, EmotionalState.RELUCTANT
+        ):
+            return False
+
+        if personality._state.is_in_flow:
+            return False
+
+        # Back off if she keeps getting left hanging
+        if self._times_left_hanging >= 3:
+            return False
+
+        mood = personality._state.overall_mood
+
+        # High probability if she just accomplished something
+        if personality.emotional_state == EmotionalState.SATISFIED:
+            return random.random() < 0.3
+
+        # Otherwise, mood-weighted random chance (low per-tick, adds up over time)
+        # At mood 0.8 → ~2% per tick. At 100ms ticks, that's ~once per 5 seconds.
+        # At mood 0.5 → effectively never.
+        if mood > 0.6:
+            chance = (mood - 0.6) * 0.05  # 0-2% per tick
+            return random.random() < chance
+
+        return False
+
+    async def initiate_bump(
+        self,
+        camera_getter: Callable,
+        arm=None,
+        dynamics=None,
+        personality=None,
+        narration=None,
+        state_manager=None,
+        wait_timeout: float = 3.0,
+    ) -> bool:
+        """ALICE offers a fist bump and waits for reciprocation.
+
+        Sequence:
+        1. Extend arm to offer position (forward, mid-height)
+        2. Hold and watch camera for a fist approaching
+        3a. Reciprocated → bump, retract happy, mood boost
+        3b. Left hanging → slow retract, tiny mood dip, personality beat
+
+        Returns True if the bump was reciprocated.
+        """
+        self._last_initiate_time = time.time()
+        self._last_bump_time = time.time()  # also set reactive cooldown
+
+        offer_angles = BUMP_CENTER
+        logger.info("ALICE is offering a fist bump")
+
+        if state_manager is not None:
+            state_manager.update_arm(offer_angles, "fist_bump_offer")
+
+        # Phase 1: Extend to offer position — deliberate, confident
+        if dynamics is not None:
+            from logic.personality import ActionOrigin
+            await dynamics.move_to(
+                offer_angles, speed=60, origin=ActionOrigin.SELF_INITIATED,
+            )
+        elif arm is not None:
+            arm.move_to(offer_angles, speed=60)
+
+        # Phase 2: Hold and watch for reciprocation
+        detector = self.get_or_create_detector()
+        deadline = time.time() + wait_timeout
+        reciprocated = False
+
+        while time.time() < deadline:
+            frame = camera_getter() if camera_getter else None
+            if frame is not None:
+                candidate = detector.detect_fist_bump(frame)
+                if candidate is not None and candidate.offer_confidence > 0.5:
+                    # They're bumping back!
+                    reciprocated = True
+                    break
+            await asyncio.sleep(0.1)
+
+        # Phase 3: Outcome
+        if reciprocated:
+            return await self._handle_reciprocated(
+                arm, dynamics, personality, narration, state_manager,
+            )
+        else:
+            return await self._handle_left_hanging(
+                arm, dynamics, personality, narration, state_manager,
+            )
+
+    async def _handle_reciprocated(self, arm, dynamics, personality,
+                                    narration, state_manager) -> bool:
+        """They bumped back! Celebrate."""
+        self._bump_count += 1
+        self._times_reciprocated += 1
+        self._times_left_hanging = max(0, self._times_left_hanging - 1)
+
+        logger.info(f"Fist bump reciprocated! (#{self._bump_count})")
+
+        # Brief hold at contact
+        await asyncio.sleep(0.5)
+
+        # Happy retract with settle
+        if dynamics is not None:
+            await dynamics.settle_motion()
+            from logic.personality import ActionOrigin
+            await dynamics.move_to(
+                RETRACT_ANGLES, origin=ActionOrigin.SELF_INITIATED,
+            )
+        elif arm is not None:
+            arm.move_to(RETRACT_ANGLES, speed=50)
+
+        # Mood boost — bigger than reactive since she put herself out there
+        if personality is not None:
+            from logic.personality import EmotionalState
+            personality._state.emotional_state = EmotionalState.SATISFIED
+            personality._state.overall_mood = min(
+                1.0, personality._state.overall_mood + 0.2
+            )
+            personality._last_action_time = time.time()
+
+        # She might comment if she's been bumping a lot
+        if narration is not None and personality is not None:
+            if self._times_reciprocated >= 2:
+                if personality.should_speak(topic="fist_bump_initiated"):
+                    await narration.speak("knew you would.")
+                    personality.record_speech("fist_bump_initiated")
+
+        return True
+
+    async def _handle_left_hanging(self, arm, dynamics, personality,
+                                    narration, state_manager) -> bool:
+        """They didn't bump back. The most human moment ALICE has."""
+        self._times_left_hanging += 1
+
+        logger.info(
+            f"Left hanging (#{self._times_left_hanging}) — "
+            f"retracting"
+        )
+
+        # Slow, deflated retract — the arm lingers a beat, then pulls back
+        await asyncio.sleep(0.4)  # the awkward pause
+
+        if dynamics is not None:
+            from logic.personality import ActionOrigin
+            # Slower retract — she's not rushing to pretend it didn't happen
+            await dynamics.move_to(
+                RETRACT_ANGLES, speed=25, origin=ActionOrigin.USER_REQUESTED,
+            )
+        elif arm is not None:
+            arm.move_to(RETRACT_ANGLES, speed=25)
+
+        # Tiny mood dip — not devastating, just... noted
+        if personality is not None:
+            from logic.personality import EmotionalState
+            personality._state.overall_mood = max(
+                0.3, personality._state.overall_mood - 0.05
+            )
+            personality._last_action_time = time.time()
+            # Don't change emotional state to annoyed — she's not mad, just a bit deflated
+            # The content state is correct: she's fine, she just didn't get what she wanted
+
+        # After being left hanging twice, she might mutter
+        if narration is not None and personality is not None:
+            if self._times_left_hanging == 2:
+                if personality.should_speak(topic="left_hanging"):
+                    await narration.speak("okay.")
+                    personality.record_speech("left_hanging")
+
+        return False
 
     # --- Convenience: detect + respond in one call ---
 
