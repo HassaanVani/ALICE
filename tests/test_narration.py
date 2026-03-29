@@ -35,7 +35,7 @@ class TestNarrationSetup:
         assert service.enabled is False
         assert service.voice_rate == 175
         assert service.min_interval == 8
-        assert service.model_name == "gemini-pro"
+        assert service.model_name == "ollama:llama3.2:3b"
 
 
 class TestNarrationInterval:

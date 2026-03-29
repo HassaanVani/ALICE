@@ -44,7 +44,12 @@ narration:
   enabled: false
   voice_rate: 175
   min_interval: 8
-  model: gemini-pro
+  # LLM backend for ALICE's voice:
+  #   "ollama:llama3.2:3b"  — local, fast (<100ms), no API key needed
+  #   "ollama:phi3:mini"    — local alternative
+  #   "gemini-pro"          — Google API (needs ALICE_GEMINI_KEY env var)
+  #   "rule"                — no LLM, rule-based only
+  model: "ollama:llama3.2:3b"
   llm_timeout: 10.0
   # TTS voice selection (platform-dependent):
   # macOS: "com.apple.voice.compact.en-US.Samantha"
