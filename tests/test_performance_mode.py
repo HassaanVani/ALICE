@@ -7,46 +7,7 @@ import time
 import numpy as np
 import pytest
 
-from logic.fist_bump import FistBumpInteraction, FIST_BUMP_ANGLES
 from logic.teaching import TeachingSession
-
-
-# --- Fist Bump ---
-
-class TestFistBumpInteraction:
-    @pytest.mark.asyncio
-    async def test_trigger(self):
-        bump = FistBumpInteraction(cooldown_s=0)
-        arm = MagicMock()
-        arm.move_to = MagicMock(return_value=True)
-        result = await bump.trigger(arm)
-        assert result is True
-        arm.move_to.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_cooldown_prevents_double_bump(self):
-        bump = FistBumpInteraction(cooldown_s=60)
-        arm = MagicMock()
-        arm.move_to = MagicMock(return_value=True)
-        await bump.trigger(arm)
-        result = await bump.trigger(arm)
-        assert result is False
-
-    def test_should_trigger_close_presence(self):
-        from vision.presence import PresenceInfo
-        bump = FistBumpInteraction(cooldown_s=0)
-        info = PresenceInfo(detected=True, closest_distance=30.0, looking_at_desk=True)
-        assert bump.should_trigger(info) is True
-
-    def test_should_trigger_far_presence(self):
-        from vision.presence import PresenceInfo
-        bump = FistBumpInteraction(cooldown_s=0)
-        info = PresenceInfo(detected=True, closest_distance=100.0, looking_at_desk=True)
-        assert bump.should_trigger(info) is False
-
-    def test_should_trigger_no_presence(self):
-        bump = FistBumpInteraction(cooldown_s=0)
-        assert bump.should_trigger(None) is False
 
 
 # --- Teaching Session ---

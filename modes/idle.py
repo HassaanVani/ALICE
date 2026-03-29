@@ -27,6 +27,10 @@ class IdleRunner(ModeRunner):
         tetris_active = False
         tetris_controller = None
 
+        # Fist bump detector — activated when someone is close
+        from logic.fist_bump import FistBumpInteraction
+        fist_bump = FistBumpInteraction()
+
         while self.ctx.running():
             # Update personality tick (mood decay, idle timer)
             if self.ctx.personality is not None:
@@ -49,6 +53,29 @@ class IdleRunner(ModeRunner):
             frame = self.ctx.cameras.get_frame(CameraRole.OVERHEAD)
             if frame is not None and not self.ctx.inference.is_frozen:
                 self.ctx.inference.predict(frame)
+
+            # --- Fist bump detection (runs on front camera when someone is close) ---
+            front_frame = self.ctx.cameras.get_frame(CameraRole.FRONT_FACING)
+            if front_frame is not None and not fist_bump.on_cooldown:
+                bumped = await fist_bump.check_and_respond(
+                    front_frame,
+                    arm=self.ctx.arm,
+                    dynamics=self.ctx.dynamics,
+                    personality=self.ctx.personality,
+                    narration=self.ctx.narration,
+                    state_manager=self.ctx.state_manager,
+                )
+                if bumped:
+                    # After a fist bump, pause Tetris if active — she's socializing
+                    if tetris_active:
+                        await self._stop_tetris(tetris_controller)
+                        tetris_active = False
+                        tetris_controller = None
+                        if self.ctx.personality is not None:
+                            self.ctx.personality.on_interrupt_from_tetris()
+                    # Skip the rest of this tick
+                    await asyncio.sleep(self.ctx.config.timing.idle_loop_s)
+                    continue
 
             # Idle behaviors
             if behavior == "tetris" and not tetris_active:
@@ -89,7 +116,8 @@ class IdleRunner(ModeRunner):
 
             await asyncio.sleep(self.ctx.config.timing.idle_loop_s)
 
-        # Clean shutdown — stop Tetris if running
+        # Clean shutdown
+        fist_bump.shutdown()
         if tetris_active and tetris_controller is not None:
             await self._stop_tetris(tetris_controller)
             if self.ctx.personality is not None:
