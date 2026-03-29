@@ -155,6 +155,58 @@ class MovementDynamics:
         self._arm.move_to(current, speed=20)
         await asyncio.sleep(0.2)
 
+    async def ease_move(self, angles: Tuple[float, ...],
+                        duration: float = 1.0,
+                        origin=None,
+                        steps: int = 10) -> bool:
+        """Move with ease-in/ease-out interpolation — smoother than linear.
+
+        Uses a sinusoidal easing curve: slow start, fast middle, slow end.
+        This makes movements feel deliberate and organic.
+        """
+        from logic.personality import ActionOrigin
+
+        if origin is None:
+            origin = ActionOrigin.USER_REQUESTED
+
+        # Apply personality hesitation before starting
+        if self._personality is not None:
+            hesitation = self._personality.get_hesitation(origin)
+            if hesitation > 0:
+                await asyncio.sleep(hesitation)
+            self._personality.on_task_start(origin)
+
+        current = self._arm.position.as_tuple()
+        if len(current) != len(angles):
+            return self._arm.move_to(angles)
+
+        step_duration = duration / steps
+
+        for i in range(1, steps + 1):
+            # Sinusoidal ease-in-out: t goes 0→1
+            t = i / steps
+            ease = (1 - math.cos(t * math.pi)) / 2  # 0→1 with easing
+
+            interp = tuple(
+                c + (a - c) * ease
+                for c, a in zip(current, angles)
+            )
+            self._arm.move_to(interp, speed=80)
+            await asyncio.sleep(step_duration)
+
+        return True
+
+    async def approach_and_settle(self, angles: Tuple[float, ...],
+                                   origin=None) -> bool:
+        """Move to target with easing, then do a small settle — the "evaluating" beat.
+
+        This is the signature ALICE movement: smooth approach, pause, tiny adjustment.
+        """
+        success = await self.ease_move(angles, duration=0.8, origin=origin)
+        if success:
+            await self.settle_motion()
+        return success
+
     def home(self) -> bool:
         """Return to home position."""
         return self._arm.home()

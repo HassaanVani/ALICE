@@ -46,6 +46,11 @@ narration:
   min_interval: 8
   model: gemini-pro
   llm_timeout: 10.0
+  # TTS voice selection (platform-dependent):
+  # macOS: "com.apple.voice.compact.en-US.Samantha"
+  # Linux: "english" or "default"
+  # Set to null for system default
+  voice_id: null
 
 personality:
   # Voice gate — opinion strength must exceed this to trigger speech

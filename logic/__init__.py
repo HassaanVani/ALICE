@@ -17,6 +17,8 @@ from .wake_scan import WakeScanRoutine, ScanWaypoint, ScanResult
 from .tea_choreography import TeaChoreography
 from .fist_bump import FistBumpInteraction
 from .teaching import TeachingSession
+from .fallbacks import retry_async, retry_sync, CameraFallback, GripperFallback, ArmFallback
+from .adaptive_tetris import AdaptiveTetris, TetrisStats
 
 try:
     from .sort_env import ChimpSortEnv

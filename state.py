@@ -45,6 +45,15 @@ class AliceState:
     personality_idle_behavior: str = "watch" # watch, micro_motion, or tetris
     personality_override_streak: int = 0
     personality_is_in_flow: bool = False
+    # Object memory (for dashboard)
+    object_memory: List[Dict] = field(default_factory=list)
+    # Desk preset voting
+    active_preset: str = ""
+    preset_votes: Dict[str, int] = field(default_factory=dict)
+    # Presence
+    presence_detected: bool = False
+    presence_count: int = 0
+    presence_distance: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -78,6 +87,12 @@ class AliceState:
             "personality_idle_behavior": self.personality_idle_behavior,
             "personality_override_streak": self.personality_override_streak,
             "personality_is_in_flow": self.personality_is_in_flow,
+            "object_memory": self.object_memory,
+            "active_preset": self.active_preset,
+            "preset_votes": self.preset_votes,
+            "presence_detected": self.presence_detected,
+            "presence_count": self.presence_count,
+            "presence_distance": self.presence_distance,
         }
 
     def to_json(self) -> str:
@@ -185,6 +200,23 @@ class AliceStateManager:
         self._state.personality_idle_behavior = idle_behavior
         self._state.personality_override_streak = override_streak
         self._state.personality_is_in_flow = is_in_flow
+        self._notify()
+
+    def update_object_memory(self, objects: List[Dict]) -> None:
+        self._state.object_memory = objects
+        self._notify()
+
+    def update_preset_votes(self, votes: Dict[str, int], active: str = "") -> None:
+        self._state.preset_votes = votes
+        if active:
+            self._state.active_preset = active
+        self._notify()
+
+    def update_presence(self, detected: bool = False, count: int = 0,
+                        distance: float = 0.0) -> None:
+        self._state.presence_detected = detected
+        self._state.presence_count = count
+        self._state.presence_distance = distance
         self._notify()
 
     def get_snapshot(self) -> dict:

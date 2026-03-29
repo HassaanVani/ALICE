@@ -34,6 +34,9 @@ export default function Audience() {
   const [floatingReactions, setFloatingReactions] = useState([]);
   const [tiltEnabled, setTiltEnabled] = useState(false);
   const [tilt, setTilt] = useState({ beta: 0, gamma: 0 });
+  const [presetVotes, setPresetVotes] = useState({});
+  const [myPresetVote, setMyPresetVote] = useState(null);
+  const [presetResult, setPresetResult] = useState(null);
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
   const reactionIdRef = useRef(0);
@@ -108,6 +111,19 @@ export default function Audience() {
             setAudienceCount(msg.count);
           }
 
+          else if (msg.type === 'preset_vote_update') {
+            setPresetVotes(msg.votes || {});
+          }
+
+          else if (msg.type === 'preset_vote_ack') {
+            setMyPresetVote(msg.preset);
+          }
+
+          else if (msg.type === 'preset_result') {
+            setPresetResult(msg);
+            setTimeout(() => setPresetResult(null), 4000);
+          }
+
           else if (msg.type === 'reaction') {
             spawnFloatingReaction(msg.emoji);
           }
@@ -147,6 +163,10 @@ export default function Audience() {
 
   const voteForBlock = (blockId) => {
     send({ type: 'vote_block', block_id: blockId });
+  };
+
+  const voteForPreset = (preset) => {
+    send({ type: 'vote_preset', preset });
   };
 
   const sendReaction = (emoji) => {
@@ -430,6 +450,47 @@ export default function Audience() {
         )}
       </div>
 
+      {/* ── Desk Preset Voting ── */}
+      {phase.label === 'Organize!' && (
+        <div style={styles.presetSection}>
+          <div style={styles.presetTitle}>Vote for a desk layout</div>
+          <div style={styles.presetGrid}>
+            {[
+              { name: 'studying', display: 'Study', icon: '📚' },
+              { name: 'drawing', display: 'Draw', icon: '🎨' },
+              { name: 'working', display: 'Work', icon: '💻' },
+              { name: 'clean', display: 'Clean', icon: '✨' },
+            ].map(p => (
+              <button
+                key={p.name}
+                onClick={() => voteForPreset(p.name)}
+                style={{
+                  ...styles.presetButton,
+                  ...(myPresetVote === p.name ? styles.presetButtonActive : {}),
+                }}
+              >
+                <span style={{ fontSize: 20 }}>{p.icon}</span>
+                <span style={{ fontSize: 11, fontWeight: 600 }}>{p.display}</span>
+                {presetVotes[p.name] > 0 && (
+                  <span style={styles.presetVoteCount}>{presetVotes[p.name]}</span>
+                )}
+              </button>
+            ))}
+          </div>
+          {presetResult && (
+            <div style={{
+              ...styles.presetResultBanner,
+              borderColor: presetResult.accepted ? '#22c55e' : '#ef4444',
+              background: presetResult.accepted ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+            }}>
+              {presetResult.accepted
+                ? `ALICE is organizing: ${presetResult.preset}`
+                : `ALICE refused: ${presetResult.reason || 'she disagrees'}`}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Tilt section ── */}
       <div style={styles.tiltSection}>
         {!tiltEnabled ? (
@@ -632,6 +693,51 @@ const styles = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     transition: 'transform 0.1s, background 0.1s',
     WebkitTapHighlightColor: 'transparent',
+  },
+
+  // Preset voting
+  presetSection: {
+    padding: '8px 16px',
+    flexShrink: 0,
+  },
+  presetTitle: {
+    fontSize: 10, fontWeight: 700, color: '#7c5cff',
+    textTransform: 'uppercase', letterSpacing: '0.1em',
+    textAlign: 'center', marginBottom: 8,
+  },
+  presetGrid: {
+    display: 'grid', gridTemplateColumns: '1fr 1fr',
+    gap: 8,
+  },
+  presetButton: {
+    display: 'flex', flexDirection: 'column',
+    alignItems: 'center', gap: 4,
+    padding: '12px 8px', borderRadius: 10,
+    border: '1px solid #ffffff0a', background: '#111116',
+    color: '#a1a1aa', cursor: 'pointer',
+    fontFamily: 'inherit',
+    transition: 'all 0.15s ease',
+    position: 'relative',
+  },
+  presetButtonActive: {
+    borderColor: '#7c5cff40',
+    background: 'rgba(124, 92, 255, 0.1)',
+    color: '#e4e4e7',
+    boxShadow: '0 0 12px rgba(124, 92, 255, 0.2)',
+  },
+  presetVoteCount: {
+    position: 'absolute', top: 4, right: 6,
+    background: '#7c5cff', color: '#fff',
+    fontSize: 9, fontWeight: 800,
+    width: 18, height: 18, borderRadius: '50%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  presetResultBanner: {
+    margin: '8px 0', padding: '8px 12px',
+    borderRadius: 8, border: '1px solid',
+    fontSize: 11, fontWeight: 600,
+    textAlign: 'center',
+    animation: 'fadeInScale 0.3s ease',
   },
 
   // Floating reactions

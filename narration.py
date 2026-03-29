@@ -246,6 +246,13 @@ class NarrationService:
 
         return None
 
+    async def speak(self, text: str) -> None:
+        """Have ALICE say something. Respects the voice gate cooldown."""
+        self._last_narration_time = time.time()
+        if self._personality is not None:
+            self._personality.record_speech(topic=text[:20])
+        await self._speak(text)
+
     async def speak_immediate(self, text: str) -> None:
         """Force ALICE to speak — bypasses voice gate. For scripted moments."""
         if self._personality is not None:
