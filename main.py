@@ -206,6 +206,17 @@ class ALICE:
             )
             self._ws_server.set_recorder(self.recorder)
 
+            # Object interaction — fetch, hand_over, nudge via dashboard commands
+            from logic.object_interaction import ObjectInteraction
+            yolo = self.inference.yolo if hasattr(self.inference, 'yolo') else None
+            self._interaction = ObjectInteraction(
+                arm=self.arm, gripper=self.gripper,
+                calibration=self.calibration, dynamics=self.dynamics,
+                personality=self.personality, yolo_detector=yolo,
+                narration=self.narration,
+            )
+            self._ws_server.set_interaction_callback(self._handle_interaction)
+
             # Inject shared hardware into PuppetServer so it drives the same arm
             self.puppet_server.arm = self.arm
             self.puppet_server.magnet = self.magnet
@@ -287,6 +298,19 @@ class ALICE:
 
     def _on_tetris_action(self, action) -> None:
         logger.debug(f"Tetris action: {action.name}")
+
+    async def _handle_interaction(self, label: str, hand_over: bool = False) -> dict:
+        """Handle fetch/hand_over commands from the dashboard."""
+        camera_getter = lambda: self.cameras.get_frame(CameraRole.OVERHEAD)
+        if hand_over:
+            result = await self._interaction.hand_over(label, camera_getter)
+        else:
+            result = await self._interaction.fetch(label, camera_getter)
+        return {
+            "action": result.action,
+            "success": result.success,
+            "message": result.message,
+        }
 
     async def run(self) -> None:
         self._running = True

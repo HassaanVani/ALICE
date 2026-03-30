@@ -38,6 +38,7 @@ class TensorStreamServer:
         self._camera_stream_clients: Set[ServerConnection] = set()
         self._camera_frame_getter: Optional[Callable] = None
         self._recorder = None
+        self._interaction_callback: Optional[Callable] = None
 
     def set_pipeline(self, pipeline: InferencePipeline) -> None:
         self.pipeline = pipeline
@@ -54,6 +55,10 @@ class TensorStreamServer:
     def set_recorder(self, recorder) -> None:
         """Set reference to SessionRecorder for recording commands."""
         self._recorder = recorder
+
+    def set_interaction_callback(self, callback: Callable) -> None:
+        """Set callback for fetch_object/hand_over commands. Called with (label, hand_over)."""
+        self._interaction_callback = callback
 
     async def register(self, websocket: ServerConnection) -> None:
         self.clients.add(websocket)
@@ -161,8 +166,36 @@ class TensorStreamServer:
                         "state": snapshot,
                     }))
 
+            elif command == "fetch_object":
+                label = data.get("label")
+                if label and self._interaction_callback:
+                    asyncio.create_task(self._handle_fetch(websocket, label))
+
+            elif command == "hand_over":
+                label = data.get("label")
+                if label and self._interaction_callback:
+                    asyncio.create_task(self._handle_fetch(websocket, label, hand_over=True))
+
         except json.JSONDecodeError as e:
             logger.debug(f"Malformed JSON from client: {e}")
+
+    async def _handle_fetch(self, websocket: ServerConnection, label: str,
+                             hand_over: bool = False) -> None:
+        """Handle an async fetch/hand_over command."""
+        try:
+            result = await self._interaction_callback(label, hand_over)
+            await websocket.send(json.dumps({
+                "type": "interaction_result",
+                "action": result.get("action", "fetch"),
+                "label": label,
+                "success": result.get("success", False),
+                "message": result.get("message", ""),
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "detail": f"Interaction failed: {e}",
+            }))
 
     def _state_sync_with_modes(self) -> str:
         """Return state_sync JSON with available_modes filtered for demos."""
