@@ -23,10 +23,26 @@ detects the object has been taken (or a timeout).
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("ObjectInteraction")
+
+# Label aliases: maps common names to COCO YOLO labels
+LABEL_ALIASES: Dict[str, List[str]] = {
+    "marker": ["pen", "pencil"],
+    "pen": ["marker", "pencil"],
+    "pencil": ["pen", "marker"],
+    "mug": ["cup"],
+    "cup": ["mug"],
+    "tissue": ["book"],
+    "tissues": ["book"],
+    "notebook": ["book"],
+    "phone": ["cell phone"],
+    "cell phone": ["phone"],
+    "wrapper": ["tissue", "napkin"],
+    "napkin": ["tissue"],
+}
 
 
 @dataclass
@@ -36,6 +52,15 @@ class HandoffZone:
     pixel_y: int = 400          # front edge (close to user)
     hold_height_z: float = 60.0 # lifted up so user can grab
     timeout_s: float = 8.0      # how long she holds before giving up
+
+
+@dataclass
+class TrashZone:
+    """Where ALICE discards objects — a physical bin or desk region."""
+    pixel_x: int = 50           # center of trash zone
+    pixel_y: int = 50           # top-left corner of desk (away from user)
+    enabled: bool = False
+    detect_label: Optional[str] = None  # YOLO label for auto-detecting a bin
 
 
 @dataclass
@@ -71,6 +96,7 @@ class ObjectInteraction:
         object_memory=None,
         narration=None,
         handoff_zone: Optional[HandoffZone] = None,
+        trash_zone: Optional[TrashZone] = None,
     ):
         self._arm = arm
         self._gripper = gripper
@@ -81,35 +107,41 @@ class ObjectInteraction:
         self._memory = object_memory
         self._narration = narration
         self._handoff = handoff_zone or HandoffZone()
+        self._trash = trash_zone or TrashZone()
+        self._busy = asyncio.Lock()
+
+    def _detect_all(self, frame) -> list:
+        """Run YOLO once and return all detections."""
+        if frame is None or self._yolo is None:
+            return []
+        return self._yolo.detect(frame)
+
+    def _match_label(self, label: str, detections: list):
+        """Find a detection matching label (with alias support).
+
+        Returns the Detection object, or None.
+        """
+        # Exact match
+        for det in detections:
+            if det.label == label:
+                return det
+
+        # Alias match
+        aliases = LABEL_ALIASES.get(label, [])
+        for det in detections:
+            if det.label in aliases:
+                return det
+
+        return None
 
     def _find_object(self, label: str, frame) -> Optional[Tuple[int, int]]:
         """Run YOLO on a frame and find an object by label.
 
         Returns (center_x, center_y) in pixels, or None if not found.
         """
-        if frame is None or self._yolo is None:
-            return None
-
-        detections = self._yolo.detect(frame)
-        for det in detections:
-            if det.label == label:
-                return (det.center_x, det.center_y)
-
-        # Try partial match (e.g. "marker" might be detected as "pen")
-        ALIASES = {
-            "marker": ["pen", "pencil"],
-            "pen": ["marker", "pencil"],
-            "mug": ["cup"],
-            "cup": ["mug"],
-            "tissue": ["book"],  # tissues aren't in COCO
-            "notebook": ["book"],
-        }
-        aliases = ALIASES.get(label, [])
-        for det in detections:
-            if det.label in aliases:
-                return (det.center_x, det.center_y)
-
-        return None
+        detections = self._detect_all(frame)
+        det = self._match_label(label, detections)
+        return (det.center_x, det.center_y) if det else None
 
     async def fetch(
         self,
@@ -348,6 +380,170 @@ class ObjectInteraction:
 
         return InteractionResult(
             success=success, action="put_away", object_label=label,
+            duration_s=time.time() - start,
+        )
+
+    async def move_near(
+        self,
+        source_label: str,
+        target_label: str,
+        camera_getter: Callable,
+        offset_px: int = 80,
+    ) -> InteractionResult:
+        """Move source object near target object.
+
+        Finds both objects in one YOLO frame, computes a smart placement
+        position near the target (on the side with most free space), and
+        executes pick-and-place.
+
+        "Move the cup near my laptop" → move_near("cup", "laptop")
+        """
+        start = time.time()
+        logger.info(f"Moving '{source_label}' near '{target_label}'")
+
+        frame = camera_getter()
+        detections = self._detect_all(frame)
+
+        source = self._match_label(source_label, detections)
+        target = self._match_label(target_label, detections)
+
+        if source is None:
+            return InteractionResult(
+                success=False, action="move_near",
+                object_label=f"{source_label} near {target_label}",
+                message=f"can't find the {source_label}",
+            )
+        if target is None:
+            return InteractionResult(
+                success=False, action="move_near",
+                object_label=f"{source_label} near {target_label}",
+                message=f"can't find the {target_label}",
+            )
+
+        # Smart placement: pick the side of target with most free space
+        place_pos = self._compute_placement_near(target, detections, source, offset_px)
+
+        from logic.arm_routines import pick_and_place
+        success = await pick_and_place(
+            self._arm, self._gripper, self._calibration,
+            pick_px=(source.center_x, source.center_y),
+            place_px=place_pos,
+        )
+
+        if success and self._memory:
+            obj_id = f"{source_label}_0"
+            self._memory.observe(
+                obj_id, source_label,
+                (place_pos[0] * 0.05, place_pos[1] * 0.05, 0),
+            )
+
+        return InteractionResult(
+            success=success, action="move_near",
+            object_label=f"{source_label} near {target_label}",
+            duration_s=time.time() - start,
+        )
+
+    def _compute_placement_near(self, target_det, all_detections: list,
+                                 source_det, offset_px: int) -> Tuple[int, int]:
+        """Find the best position near target_det with most free space.
+
+        Evaluates 4 candidates (right, left, below, above the target bbox edge)
+        and picks the one farthest from other objects.
+        """
+        tx, ty = target_det.center_x, target_det.center_y
+        # Use bbox half-dimensions for edge offset
+        hw = target_det.width // 2 if hasattr(target_det, 'width') else 40
+        hh = target_det.height // 2 if hasattr(target_det, 'height') else 40
+
+        candidates = [
+            (tx + hw + offset_px, ty),          # right
+            (tx - hw - offset_px, ty),          # left
+            (tx, ty + hh + offset_px),          # below
+            (tx, ty - hh - offset_px),          # above
+        ]
+
+        # Exclude source from obstacle list
+        obstacles = [
+            (d.center_x, d.center_y)
+            for d in all_detections
+            if d is not source_det and d is not target_det
+        ]
+
+        best = candidates[0]
+        best_score = -1
+
+        for cx, cy in candidates:
+            # Penalize out-of-frame (assume 640x480)
+            if cx < 30 or cx > 610 or cy < 30 or cy > 450:
+                continue
+
+            # Score = minimum distance to any obstacle (higher = more free space)
+            if obstacles:
+                min_dist = min(
+                    ((cx - ox) ** 2 + (cy - oy) ** 2) ** 0.5
+                    for ox, oy in obstacles
+                )
+            else:
+                min_dist = 999
+
+            if min_dist > best_score:
+                best_score = min_dist
+                best = (cx, cy)
+
+        return (int(best[0]), int(best[1]))
+
+    async def throw_away(
+        self,
+        label: str,
+        camera_getter: Callable,
+    ) -> InteractionResult:
+        """Pick up an object and place it in the trash zone.
+
+        "Throw away the wrapper" → find it, pick it up, place in trash zone.
+        If a trash bin is detected by YOLO, targets it. Otherwise uses the
+        configured pixel region.
+        """
+        start = time.time()
+        logger.info(f"Throwing away '{label}'")
+
+        if not self._trash.enabled:
+            return InteractionResult(
+                success=False, action="throw_away", object_label=label,
+                message="trash zone not configured",
+            )
+
+        frame = camera_getter()
+        obj_pos = self._find_object(label, frame)
+
+        if obj_pos is None:
+            return InteractionResult(
+                success=False, action="throw_away", object_label=label,
+                message=f"can't find the {label}",
+            )
+
+        # Determine trash target
+        trash_target = (self._trash.pixel_x, self._trash.pixel_y)
+
+        # If a bin label is configured, try to find it via YOLO
+        if self._trash.detect_label:
+            detections = self._detect_all(frame)
+            bin_det = self._match_label(self._trash.detect_label, detections)
+            if bin_det:
+                trash_target = (bin_det.center_x, bin_det.center_y)
+
+        from logic.arm_routines import pick_and_place
+        success = await pick_and_place(
+            self._arm, self._gripper, self._calibration,
+            pick_px=obj_pos, place_px=trash_target,
+        )
+
+        # Forget from memory — it's been discarded
+        if success and self._memory:
+            obj_id = f"{label}_0"
+            self._memory.forget(obj_id)
+
+        return InteractionResult(
+            success=success, action="throw_away", object_label=label,
             duration_s=time.time() - start,
         )
 

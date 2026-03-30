@@ -176,6 +176,22 @@ class TensorStreamServer:
                 if label and self._interaction_callback:
                     asyncio.create_task(self._handle_fetch(websocket, label, hand_over=True))
 
+            elif command == "move_near":
+                source = data.get("source")
+                target = data.get("target")
+                if source and target and self._interaction_callback:
+                    asyncio.create_task(self._handle_interaction_cmd(
+                        websocket, "move_near", source=source, target=target,
+                        offset_px=data.get("offset_px", 80),
+                    ))
+
+            elif command == "throw_away":
+                label = data.get("label")
+                if label and self._interaction_callback:
+                    asyncio.create_task(self._handle_interaction_cmd(
+                        websocket, "throw_away", source=label,
+                    ))
+
         except json.JSONDecodeError as e:
             logger.debug(f"Malformed JSON from client: {e}")
 
@@ -188,6 +204,30 @@ class TensorStreamServer:
                 "type": "interaction_result",
                 "action": result.get("action", "fetch"),
                 "label": label,
+                "success": result.get("success", False),
+                "message": result.get("message", ""),
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "detail": f"Interaction failed: {e}",
+            }))
+
+    async def _handle_interaction_cmd(self, websocket: ServerConnection,
+                                       action: str, source: str = "",
+                                       target: str = "", offset_px: int = 80) -> None:
+        """Handle move_near, throw_away, and future interaction commands."""
+        try:
+            result = await self._interaction_callback(
+                source, False,
+                move_near_target=target if action == "move_near" else None,
+                throw_away=action == "throw_away",
+                offset_px=offset_px,
+            )
+            await websocket.send(json.dumps({
+                "type": "interaction_result",
+                "action": result.get("action", action),
+                "label": source,
                 "success": result.get("success", False),
                 "message": result.get("message", ""),
             }))

@@ -54,6 +54,9 @@ class AliceState:
     presence_detected: bool = False
     presence_count: int = 0
     presence_distance: float = 0.0
+    # Voice input
+    voice_last_command: str = ""
+    voice_last_result: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -93,6 +96,8 @@ class AliceState:
             "presence_detected": self.presence_detected,
             "presence_count": self.presence_count,
             "presence_distance": self.presence_distance,
+            "voice_last_command": self.voice_last_command,
+            "voice_last_result": self.voice_last_result,
         }
 
     def to_json(self) -> str:

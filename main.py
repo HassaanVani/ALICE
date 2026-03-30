@@ -23,6 +23,7 @@ from modes import (ModeContext, DemoState, IdleRunner, AutoSortRunner,
 from puppet_server import PuppetServer
 from audience_server import AudienceServer
 from narration import NarrationService
+from voice_input import VoiceInputService
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -103,6 +104,9 @@ class ALICE:
 
         # Connect personality to narration voice gate
         self.narration.set_personality(self.personality)
+
+        # Voice input
+        self.voice_input = VoiceInputService(config.voice_input)
 
         # RL agent
         self._rl_agent = None
@@ -217,6 +221,17 @@ class ALICE:
             )
             self._ws_server.set_interaction_callback(self._handle_interaction)
 
+            # Voice input — wire to interaction system
+            self.voice_input.set_interaction(self._interaction)
+            self.voice_input.set_personality(self.personality)
+            self.voice_input.set_narration(self.narration)
+            self.voice_input.set_state_manager(self.state_manager)
+            self.voice_input.set_camera_getter(
+                lambda: self.cameras.get_frame(CameraRole.OVERHEAD)
+            )
+            if yolo:
+                self.voice_input.set_yolo(yolo)
+
             # Inject shared hardware into PuppetServer so it drives the same arm
             self.puppet_server.arm = self.arm
             self.puppet_server.magnet = self.magnet
@@ -299,10 +314,19 @@ class ALICE:
     def _on_tetris_action(self, action) -> None:
         logger.debug(f"Tetris action: {action.name}")
 
-    async def _handle_interaction(self, label: str, hand_over: bool = False) -> dict:
-        """Handle fetch/hand_over commands from the dashboard."""
+    async def _handle_interaction(self, label: str, hand_over: bool = False,
+                                    move_near_target: str = None,
+                                    throw_away: bool = False,
+                                    offset_px: int = 80) -> dict:
+        """Handle interaction commands from the dashboard or voice."""
         camera_getter = lambda: self.cameras.get_frame(CameraRole.OVERHEAD)
-        if hand_over:
+        if move_near_target:
+            result = await self._interaction.move_near(
+                label, move_near_target, camera_getter, offset_px,
+            )
+        elif throw_away:
+            result = await self._interaction.throw_away(label, camera_getter)
+        elif hand_over:
             result = await self._interaction.hand_over(label, camera_getter)
         else:
             result = await self._interaction.fetch(label, camera_getter)
@@ -329,6 +353,7 @@ class ALICE:
             asyncio.create_task(self._mode_loop(), name="mode_loop"),
             asyncio.create_task(self.audience_server.start(), name="audience_server"),
             asyncio.create_task(self.narration.start(), name="narration"),
+            asyncio.create_task(self.voice_input.start(), name="voice_input"),
         ]
 
         try:
@@ -401,6 +426,7 @@ class ALICE:
             self.recorder.stop()
 
         # Stop services (each has its own internal _streaming flag)
+        await self.voice_input.stop()
         await self.narration.stop()
         await self._ws_server.stop()
         await self.puppet_server.stop()

@@ -19,7 +19,7 @@ from .fist_bump import FistBumpInteraction
 from .teaching import TeachingSession
 from .fallbacks import retry_async, retry_sync, CameraFallback, GripperFallback, ArmFallback
 from .adaptive_tetris import AdaptiveTetris, TetrisStats
-from .object_interaction import ObjectInteraction, InteractionResult, HandoffZone
+from .object_interaction import ObjectInteraction, InteractionResult, HandoffZone, TrashZone, LABEL_ALIASES
 
 try:
     from .sort_env import ChimpSortEnv

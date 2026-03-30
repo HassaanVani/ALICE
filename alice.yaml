@@ -91,6 +91,21 @@ timing:
   sort_loop_s: 0.016      # sort/rebellion detection loop (~60fps)
   camera_poll_s: 0.01     # camera retry when no frame
 
+trash_zone:
+  enabled: false
+  pixel_x: 50
+  pixel_y: 50
+  detect_label: null   # YOLO label for auto-detecting a bin (e.g. "bowl")
+
+voice_input:
+  enabled: false
+  activation: wake_word        # wake_word, always_on, push_to_talk
+  wake_word: alice
+  whisper_model: base.en       # tiny.en (~75MB), base.en (~140MB), small.en (~460MB)
+  energy_threshold: 1000
+  silence_timeout_s: 1.5
+  max_record_s: 10.0
+
 tetris_screen:
   board_left: 0
   board_top: 0

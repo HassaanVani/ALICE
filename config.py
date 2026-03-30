@@ -107,6 +107,25 @@ class TetrisScreenConfig:
 
 
 @dataclass
+class TrashZoneConfig:
+    enabled: bool = False
+    pixel_x: int = 50
+    pixel_y: int = 50
+    detect_label: Optional[str] = None
+
+
+@dataclass
+class VoiceInputConfig:
+    enabled: bool = False
+    activation: str = "wake_word"
+    wake_word: str = "alice"
+    whisper_model: str = "base.en"
+    energy_threshold: int = 1000
+    silence_timeout_s: float = 1.5
+    max_record_s: float = 10.0
+
+
+@dataclass
 class AliceConfig:
     mode: str = "idle"
     simulate: bool = True
@@ -124,6 +143,8 @@ class AliceConfig:
     timing: TimingConfig = field(default_factory=TimingConfig)
     tetris_screen: TetrisScreenConfig = field(default_factory=TetrisScreenConfig)
     personality: PersonalityConfig = field(default_factory=PersonalityConfig)
+    trash_zone: TrashZoneConfig = field(default_factory=TrashZoneConfig)
+    voice_input: VoiceInputConfig = field(default_factory=VoiceInputConfig)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -281,6 +302,25 @@ def _dict_to_config(data: dict) -> AliceConfig:
         micro_period_s=p_data.get("micro_period_s", 4.0),
     )
 
+    tz_data = data.get("trash_zone", {})
+    trash_zone = TrashZoneConfig(
+        enabled=tz_data.get("enabled", False),
+        pixel_x=tz_data.get("pixel_x", 50),
+        pixel_y=tz_data.get("pixel_y", 50),
+        detect_label=tz_data.get("detect_label"),
+    )
+
+    vi_data = data.get("voice_input", {})
+    voice_input = VoiceInputConfig(
+        enabled=vi_data.get("enabled", False),
+        activation=vi_data.get("activation", "wake_word"),
+        wake_word=vi_data.get("wake_word", "alice"),
+        whisper_model=vi_data.get("whisper_model", "base.en"),
+        energy_threshold=vi_data.get("energy_threshold", 1000),
+        silence_timeout_s=vi_data.get("silence_timeout_s", 1.5),
+        max_record_s=vi_data.get("max_record_s", 10.0),
+    )
+
     return AliceConfig(
         mode=data.get("mode", "idle"),
         simulate=data.get("simulate", True),
@@ -294,6 +334,8 @@ def _dict_to_config(data: dict) -> AliceConfig:
         timing=timing,
         tetris_screen=tetris_screen,
         personality=personality,
+        trash_zone=trash_zone,
+        voice_input=voice_input,
     )
 
 
