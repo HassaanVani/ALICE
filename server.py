@@ -5,10 +5,11 @@ from typing import Set, Optional, Callable
 
 try:
     import websockets
-    from websockets.server import WebSocketServerProtocol
+    from websockets.asyncio.server import ServerConnection
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
+    ServerConnection = object
 
 from brain import InferencePipeline
 from modes import DEMO_VISIBLE_MODES
@@ -24,8 +25,8 @@ class TensorStreamServer:
     def __init__(self, host: str = "localhost", port: int = 8765):
         self.host = host
         self.port = port
-        self.clients: Set[WebSocketServerProtocol] = set()
-        self._client_queues: dict[WebSocketServerProtocol, asyncio.Queue] = {}
+        self.clients: Set[ServerConnection] = set()
+        self._client_queues: dict[ServerConnection, asyncio.Queue] = {}
         self.pipeline: Optional[InferencePipeline] = None
         self._server = None
         self._streaming = False
@@ -34,7 +35,7 @@ class TensorStreamServer:
         self._state_manager = None
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._switch_mode_callback: Optional[Callable[[str], None]] = None
-        self._camera_stream_clients: Set[WebSocketServerProtocol] = set()
+        self._camera_stream_clients: Set[ServerConnection] = set()
         self._camera_frame_getter: Optional[Callable] = None
         self._recorder = None
 
@@ -54,7 +55,7 @@ class TensorStreamServer:
         """Set reference to SessionRecorder for recording commands."""
         self._recorder = recorder
 
-    async def register(self, websocket: WebSocketServerProtocol) -> None:
+    async def register(self, websocket: ServerConnection) -> None:
         self.clients.add(websocket)
         self._client_queues[websocket] = asyncio.Queue(maxsize=self.MAX_CLIENT_QUEUE)
         asyncio.create_task(self._client_sender(websocket))
@@ -67,13 +68,13 @@ class TensorStreamServer:
             except Exception as e:
                 logger.debug(f"Failed to send initial state sync: {e}")
 
-    async def unregister(self, websocket: WebSocketServerProtocol) -> None:
+    async def unregister(self, websocket: ServerConnection) -> None:
         self.clients.discard(websocket)
         self._camera_stream_clients.discard(websocket)
         self._client_queues.pop(websocket, None)
         logger.info(f"Client disconnected. Total: {len(self.clients)}")
 
-    async def handler(self, websocket: WebSocketServerProtocol) -> None:
+    async def handler(self, websocket: ServerConnection) -> None:
         await self.register(websocket)
 
         try:
@@ -84,7 +85,7 @@ class TensorStreamServer:
         finally:
             await self.unregister(websocket)
 
-    async def _handle_message(self, message: str, websocket: WebSocketServerProtocol) -> None:
+    async def _handle_message(self, message: str, websocket: ServerConnection) -> None:
         try:
             data = json.loads(message)
             command = data.get("command")
@@ -170,7 +171,7 @@ class TensorStreamServer:
         msg["available_modes"] = list(DEMO_VISIBLE_MODES)
         return json.dumps(msg)
 
-    async def _client_sender(self, websocket: WebSocketServerProtocol) -> None:
+    async def _client_sender(self, websocket: ServerConnection) -> None:
         """Per-client sender drains the queue — applies back-pressure."""
         queue = self._client_queues.get(websocket)
         if not queue:

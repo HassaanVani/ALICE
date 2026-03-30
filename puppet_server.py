@@ -6,11 +6,11 @@ from typing import Optional, Set
 
 try:
     import websockets
-    from websockets.server import WebSocketServerProtocol
+    from websockets.asyncio.server import ServerConnection
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
-    WebSocketServerProtocol = object  # fallback for type hints
+    ServerConnection = object
 
 from hardware import (ArmController, MagnetDriver, HandToArmMapper,
                       GestureToGripper, TeachingRecorder, MotionPlayer,
@@ -44,7 +44,7 @@ class PuppetServer:
         self.recorder: Optional[TeachingRecorder] = None
         self.player: Optional[MotionPlayer] = None
 
-        self.clients: Set[WebSocketServerProtocol] = set()
+        self.clients: Set[ServerConnection] = set()
         self._server = None
         self._streaming = True
 
@@ -198,7 +198,7 @@ class PuppetServer:
 
     # ── WebSocket handler ──────────────────────────────────────────
 
-    async def handler(self, websocket: WebSocketServerProtocol) -> None:
+    async def handler(self, websocket: ServerConnection) -> None:
         self.clients.add(websocket)
         logger.info(f"Puppet client connected. Total: {len(self.clients)}")
 
@@ -221,7 +221,7 @@ class PuppetServer:
             self.clients.discard(websocket)
             logger.info(f"Client disconnected. Total: {len(self.clients)}")
 
-    async def _handle_message(self, message: str, websocket: WebSocketServerProtocol) -> None:
+    async def _handle_message(self, message: str, websocket: ServerConnection) -> None:
         try:
             data = json.loads(message)
         except json.JSONDecodeError:
@@ -293,7 +293,7 @@ class PuppetServer:
             logger.exception(f"Unexpected error handling '{msg_type}'")
             await self._send_error(websocket, "Internal server error")
 
-    async def _send_error(self, websocket: WebSocketServerProtocol, detail: str) -> None:
+    async def _send_error(self, websocket: ServerConnection, detail: str) -> None:
         try:
             await websocket.send(json.dumps({"type": "error", "detail": detail}))
         except Exception as e:
@@ -301,7 +301,7 @@ class PuppetServer:
 
     # ── Hand position handling (core of live/recording) ────────────
 
-    async def _handle_hand_position(self, data: dict, websocket: WebSocketServerProtocol) -> None:
+    async def _handle_hand_position(self, data: dict, websocket: ServerConnection) -> None:
         # Ignore hand data when in IDLE or PLAYBACK
         if self._state in (PuppeteerState.IDLE, PuppeteerState.PLAYBACK):
             return

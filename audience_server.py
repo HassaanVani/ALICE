@@ -9,10 +9,11 @@ from typing import Dict, List, Optional, Set, Tuple
 
 try:
     import websockets
-    from websockets.server import WebSocketServerProtocol
+    from websockets.asyncio.server import ServerConnection
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
+    ServerConnection = object
 
 logger = logging.getLogger("AudienceServer")
 
@@ -48,7 +49,7 @@ class AudienceServer:
         self.host = host
         self.port = port
         self.state_manager = state_manager
-        self.clients: Set[WebSocketServerProtocol] = set()
+        self.clients: Set[ServerConnection] = set()
         self._server = None
         self._running = False
 
@@ -128,7 +129,7 @@ class AudienceServer:
 
     # ── Connection handler ───────────────────────────────────────────
 
-    async def handler(self, websocket: WebSocketServerProtocol) -> None:
+    async def handler(self, websocket: ServerConnection) -> None:
         client_id = str(id(websocket))
         self.clients.add(websocket)
         logger.info(f"Audience +1 → {len(self.clients)} connected")
@@ -173,7 +174,7 @@ class AudienceServer:
 
     # ── Message handling ─────────────────────────────────────────────
 
-    async def _handle_message(self, message: str, websocket: WebSocketServerProtocol,
+    async def _handle_message(self, message: str, websocket: ServerConnection,
                               client_id: str) -> None:
         try:
             data = json.loads(message)
@@ -202,7 +203,7 @@ class AudienceServer:
             logger.debug(f"Malformed audience message: {e}")
 
     async def _handle_block_vote(self, client_id: str, block_id: int,
-                                  websocket: WebSocketServerProtocol) -> None:
+                                  websocket: ServerConnection) -> None:
         """Handle a client voting for a specific block."""
         # Remove previous vote if any
         if client_id in self._client_votes:
@@ -244,7 +245,7 @@ class AudienceServer:
     # ── Preset voting (desk organization) ─────────────────────────
 
     async def _handle_preset_vote(self, client_id: str, preset_name: str,
-                                   websocket: WebSocketServerProtocol) -> None:
+                                   websocket: ServerConnection) -> None:
         """Handle a client voting for a desk layout preset."""
         if client_id in self._client_preset_votes:
             old = self._client_preset_votes[client_id]
