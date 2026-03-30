@@ -1,8 +1,7 @@
 # ALICE Project Diagnosis & Status Report
 
-**Generated:** 2026-03-30
-**Branch:** `main` (latest: `ecf5c0a`)
-**Last commit:** feat: voice commands, spatial moves, and trash zone
+**Generated:** 2026-03-30 (updated after merge)
+**Branch:** `main`
 
 ---
 
@@ -18,10 +17,10 @@
 
 | Metric | Value |
 |--------|-------|
-| Total Python files | 127 |
-| Total Python LOC | 21,249 |
+| Total Python files | 130+ |
+| Total Python LOC | 20,000+ |
 | Test files | 55 |
-| Tests passing | 673 |
+| Tests passing | 688 |
 | Syntax errors | 0 |
 | Open PRs | 0 |
 | CI | GitHub Actions (Python 3.11 + 3.12) |
