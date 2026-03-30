@@ -95,6 +95,16 @@ def mock_context(*, running_calls=1):
     # RL agent
     ctx.rl_agent = None
 
+    # Living behaviors — disabled in tests (must be None, not MagicMock)
+    ctx.gaze_tracker = None
+    ctx.curiosity_engine = None
+    ctx.habit_engine = None
+    ctx.body_language = None
+    ctx.sound_effects = None
+    ctx.proactive = None
+    ctx.object_memory = None
+    ctx.presence_detector = None
+
     return ctx
 
 

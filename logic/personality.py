@@ -10,7 +10,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("Personality")
 
@@ -23,6 +23,8 @@ class EmotionalState(Enum):
     FOCUSED = "focused"          # tetris, complex org — rhythmic, precise, flow state
     RELUCTANT = "reluctant"      # told to do something she disagrees with
     SATISFIED = "satisfied"      # just finished a self-initiated task
+    STARTLED = "startled"        # loud noise or sudden appearance
+    PLAYFUL = "playful"          # high mood + idle + someone present
 
 
 class ActionOrigin(Enum):
@@ -128,6 +130,8 @@ class PersonalityEngine:
         EmotionalState.FOCUSED: 0.0,
         EmotionalState.ANNOYED: 0.5,
         EmotionalState.RELUCTANT: 1.2,
+        EmotionalState.STARTLED: 0.1,
+        EmotionalState.PLAYFUL: 0.0,
     }
 
     # Voice gate — opinion strength must exceed this to trigger speech
@@ -147,6 +151,26 @@ class PersonalityEngine:
         self._state = PersonalityState()
         self._last_action_time: float = time.time()
         self._presence_detected: bool = False
+        self._emotion_listeners: List[Callable[[str, str], None]] = []
+
+    def on_emotion_change(self, callback: Callable[[str, str], None]) -> None:
+        """Register a listener called on emotional state changes.
+
+        callback(old_state_value, new_state_value) — receives string values.
+        """
+        self._emotion_listeners.append(callback)
+
+    def _set_emotional_state(self, new_state: EmotionalState) -> None:
+        """Set emotional state and notify listeners."""
+        old = self._state.emotional_state
+        if old == new_state:
+            return
+        self._state.emotional_state = new_state
+        for cb in self._emotion_listeners:
+            try:
+                cb(old.value, new_state.value)
+            except Exception as e:
+                logger.error(f"Emotion listener error: {e}")
 
     @property
     def state(self) -> PersonalityState:
@@ -187,7 +211,7 @@ class PersonalityEngine:
             self._preferences[object_id] = ObjectPreference(object_id=object_id)
         self._preferences[object_id].record_placement(position)
         self._last_action_time = time.time()
-        self._state.emotional_state = EmotionalState.SATISFIED
+        self._set_emotional_state(EmotionalState.SATISFIED)
 
     def record_user_override(self, object_id: str,
                              new_position: Tuple[float, float, float]) -> None:
@@ -199,9 +223,9 @@ class PersonalityEngine:
         self._last_action_time = time.time()
 
         if self._state.override_streak >= self.OVERRIDE_COMMENT_THRESHOLD:
-            self._state.emotional_state = EmotionalState.ANNOYED
+            self._set_emotional_state(EmotionalState.ANNOYED)
         else:
-            self._state.emotional_state = EmotionalState.RELUCTANT
+            self._set_emotional_state(EmotionalState.RELUCTANT)
 
         logger.debug(
             f"Override on {object_id} (streak: {self._state.override_streak})"
@@ -210,7 +234,7 @@ class PersonalityEngine:
     def record_user_acceptance(self, object_id: str) -> None:
         """User left an object where ALICE put it — she was right."""
         self._state.override_streak = 0
-        self._state.emotional_state = EmotionalState.CONTENT
+        self._set_emotional_state(EmotionalState.CONTENT)
 
     # --- Movement Dynamics ---
 
@@ -305,30 +329,30 @@ class PersonalityEngine:
 
         if detected and not was_present:
             # Someone arrived — shift from idle to curious
-            self._state.emotional_state = EmotionalState.CURIOUS
+            self._set_emotional_state(EmotionalState.CURIOUS)
             logger.info("Presence detected — ALICE is paying attention")
 
     def enter_flow_state(self) -> None:
         """ALICE entered flow (Tetris, complex org) — suppress speech, smooth motion."""
         self._state.is_in_flow = True
-        self._state.emotional_state = EmotionalState.FOCUSED
+        self._set_emotional_state(EmotionalState.FOCUSED)
 
     def exit_flow_state(self) -> None:
         """Exiting flow — return to default emotional state."""
         self._state.is_in_flow = False
-        self._state.emotional_state = EmotionalState.CONTENT
+        self._set_emotional_state(EmotionalState.CONTENT)
 
     def on_task_start(self, origin: ActionOrigin) -> None:
         """Called when ALICE begins any action — update emotional state."""
         self._last_action_time = time.time()
 
         if origin == ActionOrigin.SELF_INITIATED:
-            self._state.emotional_state = EmotionalState.CONTENT
+            self._set_emotional_state(EmotionalState.CONTENT)
         elif origin == ActionOrigin.OVERRIDE:
             if self._state.override_streak >= self.OVERRIDE_COMMENT_THRESHOLD:
-                self._state.emotional_state = EmotionalState.ANNOYED
+                self._set_emotional_state(EmotionalState.ANNOYED)
             else:
-                self._state.emotional_state = EmotionalState.RELUCTANT
+                self._set_emotional_state(EmotionalState.RELUCTANT)
         elif origin == ActionOrigin.USER_REQUESTED:
             # Neutral — she'll do it
             pass
@@ -340,7 +364,7 @@ class PersonalityEngine:
         after the piece is placed.
         """
         self.exit_flow_state()
-        self._state.emotional_state = EmotionalState.CURIOUS
+        self._set_emotional_state(EmotionalState.CURIOUS)
         self._last_action_time = time.time()
         logger.info("Interrupted from Tetris — finishing piece, then attending")
 
@@ -363,6 +387,7 @@ class PersonalityEngine:
         # Emotional state resets to content if idle long enough
         idle = time.time() - self._last_action_time
         if idle > 10.0 and self._state.emotional_state in (
-            EmotionalState.ANNOYED, EmotionalState.RELUCTANT
+            EmotionalState.ANNOYED, EmotionalState.RELUCTANT,
+            EmotionalState.STARTLED,
         ):
-            self._state.emotional_state = EmotionalState.CONTENT
+            self._set_emotional_state(EmotionalState.CONTENT)

@@ -52,6 +52,16 @@ class ModeContext:
     personality: Optional[PersonalityEngine] = None
     dynamics: Optional[MovementDynamics] = None
 
+    # Living behaviors (all optional — None when disabled)
+    gaze_tracker: Any = None
+    curiosity_engine: Any = None
+    habit_engine: Any = None
+    body_language: Any = None
+    sound_effects: Any = None
+    proactive: Any = None
+    object_memory: Any = None
+    presence_detector: Any = None
+
     def running(self) -> bool:
         """True while the system is running AND still in this mode."""
         return self.is_running() and self.is_current_mode()

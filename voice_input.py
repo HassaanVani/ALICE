@@ -168,6 +168,46 @@ class CommandParser:
         return label.strip()
 
 
+# --- Voice sentiment detection ---
+
+class SentimentDetector:
+    """Lightweight keyword-based sentiment detection on transcribed text.
+
+    Not a command parser — this detects the emotional valence of what
+    the user said so ALICE can react physically (body language).
+    Works on ALL utterances, not just wake-word-activated commands.
+    """
+
+    _PRAISE = {
+        "good job", "nice work", "thank you", "thanks", "great job",
+        "awesome", "perfect", "well done", "good girl", "good alice",
+        "nice one", "love it", "that's right", "exactly",
+    }
+    _SCOLD = {
+        "no", "stop", "wrong", "bad", "don't", "quit it", "not there",
+        "put it back", "undo",
+    }
+    _QUESTION = {
+        "what", "where", "why", "how", "can you", "could you", "will you",
+    }
+
+    def detect(self, text: str) -> Tuple[str, float]:
+        """Return (sentiment, confidence). Sentiment: praise/scold/question/neutral."""
+        lower = text.lower().strip().rstrip(".,!?")
+
+        praise_score = sum(1 for kw in self._PRAISE if kw in lower)
+        scold_score = sum(1 for kw in self._SCOLD if kw in lower)
+        question_score = sum(1 for kw in self._QUESTION if lower.startswith(kw))
+
+        if praise_score > scold_score and praise_score > 0:
+            return ("praise", min(1.0, praise_score * 0.5))
+        elif scold_score > praise_score and scold_score > 0:
+            return ("scold", min(1.0, scold_score * 0.5))
+        elif question_score > 0:
+            return ("question", 0.6)
+        return ("neutral", 0.3)
+
+
 # --- Whisper STT ---
 
 class WhisperSTT:
@@ -343,6 +383,7 @@ class VoiceInputService:
 
         self._stt = WhisperSTT(model_name=self._whisper_model)
         self._parser = CommandParser()
+        self._sentiment = SentimentDetector()
         self._audio: Optional[AudioCapture] = None
         self._audio_queue: asyncio.Queue = asyncio.Queue(maxsize=5)
         self._running = False
@@ -356,6 +397,7 @@ class VoiceInputService:
         self._yolo = None
         self._ollama = None
         self._interrupt_callback: Optional[Callable] = None
+        self._body_language = None
 
     def set_interaction(self, interaction) -> None:
         self._interaction = interaction
@@ -381,6 +423,10 @@ class VoiceInputService:
     def set_interrupt_callback(self, cb: Callable) -> None:
         """Callback to interrupt current mode (e.g. stop Tetris)."""
         self._interrupt_callback = cb
+
+    def set_body_language(self, bl) -> None:
+        """Attach body language system for voice sentiment → posture reactions."""
+        self._body_language = bl
 
     async def start(self) -> None:
         """Start the voice input service."""
@@ -443,6 +489,11 @@ class VoiceInputService:
 
         logger.info(f"Voice heard: \"{text}\"")
 
+        # Sentiment detection — always runs, even for non-commands
+        sentiment_label, sentiment_conf = self._sentiment.detect(text)
+        if self._body_language is not None and sentiment_label != "neutral":
+            self._body_language.on_voice_sentiment(sentiment_label, sentiment_conf)
+
         # Wake word check
         if self._activation == "wake_word":
             text_lower = text.lower().strip()
@@ -497,7 +548,7 @@ class VoiceInputService:
         if self._personality:
             self._personality._last_action_time = time.time()
             from logic.personality import EmotionalState
-            self._personality._state.emotional_state = EmotionalState.CURIOUS
+            self._personality._set_emotional_state(EmotionalState.CURIOUS)
             self._personality.set_presence(True)
 
         # Interrupt current activity (e.g. Tetris)

@@ -102,6 +102,16 @@ class ALICE:
         self.personality = PersonalityEngine()
         self.dynamics: Optional[MovementDynamics] = None
 
+        # Living behaviors (initialized in initialize() if enabled)
+        self.object_memory = None
+        self.gaze_tracker = None
+        self.curiosity_engine = None
+        self.habit_engine = None
+        self.body_language = None
+        self.sound_effects_engine = None
+        self.proactive = None
+        self.presence_detector = None
+
         # Connect personality to narration voice gate
         self.narration.set_personality(self.personality)
 
@@ -240,6 +250,70 @@ class ALICE:
 
             # Wire tensor server for activation forwarding to dashboard
             self.puppet_server.set_tensor_server(self._ws_server)
+
+            # --- Living behaviors ---
+            if self.config.living_behaviors.enabled:
+                from logic.gaze_tracker import GazeTracker
+                from logic.curiosity import CuriosityEngine
+                from logic.habits import HabitEngine
+                from logic.body_language import BodyLanguage
+                from logic.proactive import ProactiveEngagement
+                from audio.sound_effects import SoundEffects
+                from logic.object_memory import ObjectMemory
+                from vision.presence import PresenceDetector
+
+                lb = self.config.living_behaviors
+
+                self.object_memory = ObjectMemory()
+                self.object_memory.load()
+
+                self.presence_detector = PresenceDetector()
+                self.presence_detector.start()
+
+                self.gaze_tracker = GazeTracker(
+                    alpha=lb.gaze_smoothing,
+                    face_priority=lb.gaze_face_priority,
+                )
+                self.curiosity_engine = CuriosityEngine()
+                self.curiosity_engine.DECAY_RATE = lb.curiosity_decay_rate
+                self.curiosity_engine.MIN_THRESHOLD = lb.curiosity_examine_threshold
+                self.curiosity_engine.load(Path("data/curiosity_state.json"))
+
+                self.habit_engine = HabitEngine()
+                self.habit_engine.MIN_OBSERVATIONS = lb.habit_min_observations
+                self.habit_engine.load(Path("data/habits.json"))
+
+                self.body_language = BodyLanguage()
+                self.body_language.set_enabled(lb.body_language_enabled)
+
+                self.sound_effects_engine = SoundEffects(
+                    arm=self.arm,
+                    enabled=self.config.sound_effects.enabled,
+                    intensity=self.config.sound_effects.intensity,
+                )
+
+                self.proactive = ProactiveEngagement(
+                    curiosity=self.curiosity_engine,
+                    habits=self.habit_engine,
+                    gaze=self.gaze_tracker,
+                    body_language=self.body_language,
+                    sound_effects=self.sound_effects_engine,
+                    personality=self.personality,
+                    object_memory=self.object_memory,
+                )
+                self.proactive.MIN_ACTION_INTERVAL = lb.proactive_min_interval_s
+
+                # Wire into dynamics
+                self.dynamics.set_body_language(self.body_language)
+                self.dynamics.set_gaze_tracker(self.gaze_tracker)
+
+                # Wire emotion listener → body language
+                self.personality.on_emotion_change(self.body_language.on_emotion_change)
+
+                # Wire voice sentiment → body language
+                self.voice_input.set_body_language(self.body_language)
+
+                logger.info("Living behaviors initialized")
 
             # Load RL agent if available
             self._load_rl_agent()
@@ -397,6 +471,14 @@ class ALICE:
             dynamics=self.dynamics,
             is_running=lambda: self._running,
             is_current_mode=lambda: self.mode == current_mode,
+            gaze_tracker=self.gaze_tracker,
+            curiosity_engine=self.curiosity_engine,
+            habit_engine=self.habit_engine,
+            body_language=self.body_language,
+            sound_effects=self.sound_effects_engine,
+            proactive=self.proactive,
+            object_memory=self.object_memory,
+            presence_detector=self.presence_detector,
         )
 
     async def _mode_loop(self) -> None:
@@ -420,6 +502,16 @@ class ALICE:
         SHUTDOWN_TIMEOUT = 5.0  # seconds to wait before force-cancelling tasks
         logger.info("Shutting down")
         self._running = False
+
+        # Save living behavior state
+        if self.curiosity_engine:
+            self.curiosity_engine.save(Path("data/curiosity_state.json"))
+        if self.habit_engine:
+            self.habit_engine.save(Path("data/habits.json"))
+        if self.object_memory:
+            self.object_memory.save()
+        if self.presence_detector:
+            self.presence_detector.stop()
 
         # Stop recording
         if self.recorder.is_recording:

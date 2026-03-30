@@ -34,6 +34,17 @@ class IdleRunner(ModeRunner):
         # Auto-cleanup state
         last_cleanup_time: float = 0.0
 
+        # Living behaviors — snapshot references (None when disabled)
+        gaze = self.ctx.gaze_tracker
+        curiosity = self.ctx.curiosity_engine
+        habits = self.ctx.habit_engine
+        body_lang = self.ctx.body_language
+        proactive = self.ctx.proactive
+        sfx = self.ctx.sound_effects
+        obj_memory = self.ctx.object_memory
+        presence_det = self.ctx.presence_detector
+        last_habit_snapshot: float = 0.0
+
         while self.ctx.running():
             # Update personality tick (mood decay, idle timer)
             if self.ctx.personality is not None:
@@ -57,8 +68,82 @@ class IdleRunner(ModeRunner):
             if frame is not None and not self.ctx.inference.is_frozen:
                 self.ctx.inference.predict(frame)
 
-            # --- Fist bump (reactive + initiated) ---
+            # --- Living behaviors tick ---
             front_frame = self.ctx.cameras.get_frame(CameraRole.FRONT_FACING)
+            presence = None
+
+            if front_frame is not None and presence_det is not None:
+                presence = presence_det.detect(front_frame)
+                if presence.detected and self.ctx.personality:
+                    self.ctx.personality.set_presence(True)
+
+                # Feed face position to gaze tracker
+                if gaze is not None and presence.detected:
+                    gaze.update_face({
+                        "center_x": presence.face_center_x,
+                        "center_y": presence.face_center_y,
+                        "distance_cm": presence.closest_distance,
+                    })
+
+                # Update state for dashboard
+                if presence is not None:
+                    self.ctx.state_manager.update_presence(
+                        detected=presence.detected,
+                        count=presence.face_count,
+                        distance=presence.closest_distance,
+                    )
+
+            if curiosity is not None:
+                # Feed YOLO detections to curiosity engine
+                if frame is not None and hasattr(self.ctx.inference, 'yolo'):
+                    try:
+                        detections = self.ctx.inference.yolo.detect(frame)
+                        mem_objects = obj_memory.objects if obj_memory else {}
+                        curiosity.update(detections, mem_objects)
+                    except Exception:
+                        pass
+                curiosity.tick()
+
+            if habits is not None and obj_memory is not None:
+                import time as _time
+                now = _time.time()
+                lb_cfg = getattr(self.ctx.config, 'living_behaviors', None)
+                snapshot_interval = getattr(lb_cfg, 'habit_snapshot_interval_s', 30.0) if lb_cfg else 30.0
+                if now - last_habit_snapshot > snapshot_interval:
+                    habits.observe_snapshot(obj_memory.objects)
+                    last_habit_snapshot = now
+                habits.tick()
+
+            if body_lang is not None:
+                body_lang.tick(self.ctx.config.timing.idle_loop_s)
+
+            # Proactive engagement — only when not in tetris and no bump happening
+            if proactive is not None and not tetris_active and not proactive.is_executing:
+                decision = proactive.decide(presence)
+                if decision.action.value != "none":
+                    await proactive.execute(
+                        decision,
+                        self.ctx.dynamics,
+                        self.ctx.arm,
+                        self.ctx.calibration,
+                        lambda: self.ctx.cameras.get_frame(CameraRole.OVERHEAD),
+                        self.ctx.narration,
+                    )
+
+            # Sync living behavior state to dashboard
+            if any(x is not None for x in [gaze, curiosity, habits, body_lang]):
+                self.ctx.state_manager.update_living_behaviors(
+                    gaze_target=gaze.get_target().label if gaze else "",
+                    curiosity_total=curiosity.total_curiosity if curiosity else 0.0,
+                    curiosity_most_curious=(curiosity.get_most_curious().object_id
+                                            if curiosity and curiosity.get_most_curious() else ""),
+                    active_habits=habits.active_habit_count if habits else 0,
+                    current_posture=body_lang.current_posture_name if body_lang else "",
+                    engagement_action=(proactive.is_executing and "active" or "idle")
+                                      if proactive else "none",
+                )
+
+            # --- Fist bump (reactive + initiated) ---
             bump_happened = False
 
             if front_frame is not None and not fist_bump.on_cooldown:
@@ -74,13 +159,14 @@ class IdleRunner(ModeRunner):
 
             if not bump_happened and not fist_bump.initiate_on_cooldown:
                 # Initiated: maybe ALICE offers a fist bump
-                from vision.presence import PresenceDetector, PresenceInfo
-                # Build a quick presence check from front camera availability
-                presence = PresenceInfo(
-                    detected=front_frame is not None,
-                    closest_distance=50.0 if front_frame is not None else float("inf"),
-                    looking_at_desk=True,
-                )
+                from vision.presence import PresenceInfo
+                # Use real presence if available, else fallback
+                if presence is None:
+                    presence = PresenceInfo(
+                        detected=front_frame is not None,
+                        closest_distance=50.0 if front_frame is not None else float("inf"),
+                        looking_at_desk=True,
+                    )
                 if fist_bump.should_initiate(
                     personality=self.ctx.personality,
                     presence_info=presence,

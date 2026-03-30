@@ -106,6 +106,21 @@ voice_input:
   silence_timeout_s: 1.5
   max_record_s: 10.0
 
+sound_effects:
+  enabled: false
+  intensity: 1.0              # servo vibration amplitude scale (0.0-1.0)
+
+living_behaviors:
+  enabled: false
+  gaze_smoothing: 0.06        # EMA alpha — lower = smoother/slower tracking
+  gaze_face_priority: 0.8     # face tracking priority vs objects
+  curiosity_decay_rate: 0.005  # per-tick curiosity decay
+  curiosity_examine_threshold: 0.25  # min curiosity to trigger examination
+  habit_min_observations: 3    # pattern repetitions before habit forms
+  habit_snapshot_interval_s: 30.0    # seconds between object snapshots
+  proactive_min_interval_s: 6.0     # seconds between proactive actions
+  body_language_enabled: true        # emotional posture overlays
+
 tetris_screen:
   board_left: 0
   board_top: 0

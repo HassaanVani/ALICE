@@ -34,6 +34,8 @@ class PresenceInfo:
     closest_distance: float = float("inf")  # rough distance in cm (from bbox size)
     looking_at_desk: bool = False
     timestamp: float = 0.0
+    face_center_x: float = 0.0   # pixel X of closest face in frame
+    face_center_y: float = 0.0   # pixel Y of closest face in frame
 
     def to_dict(self) -> dict:
         return {
@@ -42,6 +44,8 @@ class PresenceInfo:
             "closest_distance": round(self.closest_distance, 1),
             "looking_at_desk": self.looking_at_desk,
             "timestamp": self.timestamp,
+            "face_center_x": round(self.face_center_x, 1),
+            "face_center_y": round(self.face_center_y, 1),
         }
 
 
@@ -176,6 +180,8 @@ class PresenceDetector:
             closest_distance=closest["distance_cm"] if closest else float("inf"),
             looking_at_desk=looking,
             timestamp=now,
+            face_center_x=closest["center_x"] if closest else 0.0,
+            face_center_y=closest["center_y"] if closest else 0.0,
         )
         self._last_info = info
         return info
@@ -192,6 +198,8 @@ class PresenceDetector:
             closest_distance=65.0,
             looking_at_desk=True,
             timestamp=time.time(),
+            face_center_x=640.0,
+            face_center_y=400.0,
         )
         self._last_info = info
         return info

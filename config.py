@@ -115,6 +115,25 @@ class TrashZoneConfig:
 
 
 @dataclass
+class SoundEffectsConfig:
+    enabled: bool = False
+    intensity: float = 1.0
+
+
+@dataclass
+class LivingBehaviorsConfig:
+    enabled: bool = False
+    gaze_smoothing: float = 0.06
+    gaze_face_priority: float = 0.8
+    curiosity_decay_rate: float = 0.005
+    curiosity_examine_threshold: float = 0.25
+    habit_min_observations: int = 3
+    habit_snapshot_interval_s: float = 30.0
+    proactive_min_interval_s: float = 6.0
+    body_language_enabled: bool = True
+
+
+@dataclass
 class VoiceInputConfig:
     enabled: bool = False
     activation: str = "wake_word"
@@ -145,6 +164,8 @@ class AliceConfig:
     personality: PersonalityConfig = field(default_factory=PersonalityConfig)
     trash_zone: TrashZoneConfig = field(default_factory=TrashZoneConfig)
     voice_input: VoiceInputConfig = field(default_factory=VoiceInputConfig)
+    sound_effects: SoundEffectsConfig = field(default_factory=SoundEffectsConfig)
+    living_behaviors: LivingBehaviorsConfig = field(default_factory=LivingBehaviorsConfig)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -321,6 +342,25 @@ def _dict_to_config(data: dict) -> AliceConfig:
         max_record_s=vi_data.get("max_record_s", 10.0),
     )
 
+    se_data = data.get("sound_effects", {})
+    sound_effects = SoundEffectsConfig(
+        enabled=se_data.get("enabled", False),
+        intensity=se_data.get("intensity", 1.0),
+    )
+
+    lb_data = data.get("living_behaviors", {})
+    living_behaviors = LivingBehaviorsConfig(
+        enabled=lb_data.get("enabled", False),
+        gaze_smoothing=lb_data.get("gaze_smoothing", 0.06),
+        gaze_face_priority=lb_data.get("gaze_face_priority", 0.8),
+        curiosity_decay_rate=lb_data.get("curiosity_decay_rate", 0.005),
+        curiosity_examine_threshold=lb_data.get("curiosity_examine_threshold", 0.25),
+        habit_min_observations=lb_data.get("habit_min_observations", 3),
+        habit_snapshot_interval_s=lb_data.get("habit_snapshot_interval_s", 30.0),
+        proactive_min_interval_s=lb_data.get("proactive_min_interval_s", 6.0),
+        body_language_enabled=lb_data.get("body_language_enabled", True),
+    )
+
     return AliceConfig(
         mode=data.get("mode", "idle"),
         simulate=data.get("simulate", True),
@@ -336,6 +376,8 @@ def _dict_to_config(data: dict) -> AliceConfig:
         personality=personality,
         trash_zone=trash_zone,
         voice_input=voice_input,
+        sound_effects=sound_effects,
+        living_behaviors=living_behaviors,
     )
 
 

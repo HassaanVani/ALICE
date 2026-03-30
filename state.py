@@ -57,6 +57,13 @@ class AliceState:
     # Voice input
     voice_last_command: str = ""
     voice_last_result: str = ""
+    # Living behaviors
+    gaze_target: str = ""
+    curiosity_total: float = 0.0
+    curiosity_most_curious: str = ""
+    active_habits: int = 0
+    current_posture: str = ""
+    engagement_action: str = "none"
 
     def to_dict(self) -> dict:
         return {
@@ -98,6 +105,12 @@ class AliceState:
             "presence_distance": self.presence_distance,
             "voice_last_command": self.voice_last_command,
             "voice_last_result": self.voice_last_result,
+            "gaze_target": self.gaze_target,
+            "curiosity_total": round(self.curiosity_total, 2),
+            "curiosity_most_curious": self.curiosity_most_curious,
+            "active_habits": self.active_habits,
+            "current_posture": self.current_posture,
+            "engagement_action": self.engagement_action,
         }
 
     def to_json(self) -> str:
@@ -222,6 +235,20 @@ class AliceStateManager:
         self._state.presence_detected = detected
         self._state.presence_count = count
         self._state.presence_distance = distance
+        self._notify()
+
+    def update_living_behaviors(self, gaze_target: str = "",
+                                curiosity_total: float = 0.0,
+                                curiosity_most_curious: str = "",
+                                active_habits: int = 0,
+                                current_posture: str = "",
+                                engagement_action: str = "none") -> None:
+        self._state.gaze_target = gaze_target
+        self._state.curiosity_total = curiosity_total
+        self._state.curiosity_most_curious = curiosity_most_curious
+        self._state.active_habits = active_habits
+        self._state.current_posture = current_posture
+        self._state.engagement_action = engagement_action
         self._notify()
 
     def get_snapshot(self) -> dict:

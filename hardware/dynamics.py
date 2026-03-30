@@ -38,6 +38,16 @@ class MovementDynamics:
         self._last_micro_time: float = 0.0
         self._micro_phase: float = 0.0
         self._last_interest_angles: Optional[Tuple[float, ...]] = None
+        self._body_language = None   # Optional[BodyLanguage]
+        self._gaze_tracker = None    # Optional[GazeTracker]
+
+    def set_body_language(self, bl) -> None:
+        """Attach body language system for posture overlays."""
+        self._body_language = bl
+
+    def set_gaze_tracker(self, gt) -> None:
+        """Attach gaze tracker for idle head following."""
+        self._gaze_tracker = gt
 
     @property
     def arm(self) -> ArmController:
@@ -86,6 +96,11 @@ class MovementDynamics:
             f"(base={base:.0f} × {speed_mult:.1f}), origin={origin.value}"
         )
 
+        # Apply body language posture overlay
+        if self._body_language is not None:
+            offset = self._body_language.get_current_offset()
+            angles = tuple(a + o for a, o in zip(angles, offset))
+
         return self._arm.move_to(angles, speed=effective_speed)
 
     async def move_to_urgent(self, angles: Tuple[float, ...],
@@ -110,9 +125,13 @@ class MovementDynamics:
     async def idle_micro_motion(self) -> None:
         """Subtle idle scanning — ALICE is never fully still when awake.
 
-        Produces a slow sinusoidal drift on the base joint (j1), oriented
-        toward the last point of interest if available.
+        When gaze tracker is attached, delegates to it for face/object tracking.
+        Otherwise, produces a slow sinusoidal drift on the base joint (j1).
         """
+        if self._gaze_tracker is not None:
+            await self._gaze_tracker.apply(self)
+            return
+
         now = time.time()
         dt = now - self._last_micro_time if self._last_micro_time else 0.0
         self._last_micro_time = now
