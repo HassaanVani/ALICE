@@ -36,7 +36,8 @@ except ImportError:
 try:
     import sounddevice as sd
     SD_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
+    # OSError: PortAudio library not found (sounddevice installed but no system lib)
     SD_AVAILABLE = False
 
 
