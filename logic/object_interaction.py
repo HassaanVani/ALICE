@@ -44,6 +44,14 @@ LABEL_ALIASES: Dict[str, List[str]] = {
     "napkin": ["tissue"],
 }
 
+# Objects ALICE considers trash — she'll auto-clean these when in the mood
+TRASH_ELIGIBLE: set = {
+    "tissue", "tissues", "napkin", "wrapper",
+}
+
+# How often ALICE can auto-clean (seconds)
+AUTO_CLEANUP_COOLDOWN = 60.0
+
 
 @dataclass
 class HandoffZone:
@@ -544,6 +552,155 @@ class ObjectInteraction:
 
         return InteractionResult(
             success=success, action="throw_away", object_label=label,
+            duration_s=time.time() - start,
+        )
+
+    # --- Autonomous cleanup ---
+
+    def scan_for_trash(self, camera_getter: Callable) -> List[str]:
+        """Look at the desk and return labels of trash-eligible objects.
+
+        ALICE glances at the desk and notices things that don't belong.
+        Returns a list of YOLO labels that match TRASH_ELIGIBLE.
+        """
+        frame = camera_getter() if camera_getter else None
+        if frame is None:
+            return []
+        detections = self._detect_all(frame)
+        found = []
+        for det in detections:
+            if det.label in TRASH_ELIGIBLE:
+                found.append(det.label)
+            else:
+                # Check aliases
+                for trash_label in TRASH_ELIGIBLE:
+                    aliases = LABEL_ALIASES.get(trash_label, [])
+                    if det.label in aliases:
+                        found.append(det.label)
+                        break
+        return found
+
+    def should_auto_cleanup(self, personality=None,
+                             last_cleanup_time: float = 0.0) -> bool:
+        """Decide whether ALICE should autonomously clean up right now.
+
+        She cleans when:
+        - Trash zone is enabled
+        - She's not on cleanup cooldown
+        - Her mood is decent (> 0.4) — she won't clean when annoyed
+        - She's been idle for a bit (> 5s) — she's not mid-task
+        - She's not in flow state (Tetris)
+        - Random chance weighted by mood — higher mood = more proactive
+
+        She's more likely to clean:
+        - When she's CONTENT or SATISFIED (she likes things tidy)
+        - After someone leaves (desk is "hers" again)
+        - When mood is high (she has the energy)
+        """
+        import random
+
+        if not self._trash.enabled:
+            return False
+
+        if time.time() - last_cleanup_time < AUTO_CLEANUP_COOLDOWN:
+            return False
+
+        if personality is None:
+            return False
+
+        from logic.personality import EmotionalState
+
+        # Don't clean when upset or focused
+        if personality.emotional_state in (
+            EmotionalState.ANNOYED, EmotionalState.RELUCTANT,
+        ):
+            return False
+
+        if personality._state.is_in_flow:
+            return False
+
+        # Need some idle time — she's not mid-task
+        idle_time = time.time() - personality._last_action_time
+        if idle_time < 5.0:
+            return False
+
+        mood = personality._state.overall_mood
+
+        # Don't bother if mood is too low
+        if mood < 0.4:
+            return False
+
+        # Higher mood = higher chance. At mood 0.7, ~5% per tick.
+        # At 100ms ticks, that's roughly once per 2 seconds.
+        chance = (mood - 0.3) * 0.12
+        return random.random() < chance
+
+    async def auto_cleanup(
+        self,
+        camera_getter: Callable,
+        personality=None,
+        narration=None,
+    ) -> InteractionResult:
+        """Autonomously scan for and throw away trash-eligible objects.
+
+        ALICE looks at the desk, finds things that don't belong, and
+        throws them away one at a time. This is a self-initiated action —
+        she moves faster and with more confidence than when told to clean.
+
+        Personality effects:
+        - She moves at SELF_INITIATED speed (1.3x — she wants to do this)
+        - After cleaning: mood boost, SATISFIED state
+        - If trash keeps reappearing: she may comment ("again?")
+        - She gets a small mood boost per item cleaned
+        """
+        start = time.time()
+        trash_labels = self.scan_for_trash(camera_getter)
+
+        if not trash_labels:
+            return InteractionResult(
+                success=True, action="auto_cleanup", object_label="",
+                message="desk is clean",
+            )
+
+        logger.info(f"Auto-cleanup: found {len(trash_labels)} item(s) to toss: {trash_labels}")
+
+        # Personality: she's taking initiative
+        if personality:
+            from logic.personality import ActionOrigin, EmotionalState
+            personality.on_task_start(ActionOrigin.SELF_INITIATED)
+
+        cleaned = 0
+        for label in trash_labels:
+            result = await self.throw_away(label, camera_getter)
+            if result.success:
+                cleaned += 1
+
+                # Small mood boost per item
+                if personality:
+                    personality._state.overall_mood = min(
+                        1.0, personality._state.overall_mood + 0.05,
+                    )
+
+        # Post-cleanup personality
+        if personality and cleaned > 0:
+            from logic.personality import EmotionalState
+            personality._state.emotional_state = EmotionalState.SATISFIED
+            personality._last_action_time = time.time()
+
+        # She might comment
+        if narration and personality and cleaned > 0:
+            if personality.should_speak(topic="auto_cleanup"):
+                if cleaned >= 3:
+                    await narration.speak("this desk was a mess.")
+                    personality.record_speech("auto_cleanup")
+                elif cleaned >= 1:
+                    await narration.speak("better.")
+                    personality.record_speech("auto_cleanup")
+
+        return InteractionResult(
+            success=cleaned > 0, action="auto_cleanup",
+            object_label=f"{cleaned} items",
+            message=f"cleaned {cleaned}/{len(trash_labels)}",
             duration_s=time.time() - start,
         )
 

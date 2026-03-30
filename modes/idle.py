@@ -31,6 +31,9 @@ class IdleRunner(ModeRunner):
         from logic.fist_bump import FistBumpInteraction
         fist_bump = FistBumpInteraction()
 
+        # Auto-cleanup state
+        last_cleanup_time: float = 0.0
+
         while self.ctx.running():
             # Update personality tick (mood decay, idle timer)
             if self.ctx.personality is not None:
@@ -129,6 +132,44 @@ class IdleRunner(ModeRunner):
                     tetris_controller = None
                     if self.ctx.personality is not None:
                         self.ctx.personality.on_interrupt_from_tetris()
+
+                # --- Auto-cleanup: ALICE notices trash and tidies up ---
+                if hasattr(self.ctx, 'config') and self.ctx.config.trash_zone.enabled:
+                    from logic.object_interaction import ObjectInteraction
+                    # Build an interaction instance if we have the pieces
+                    if (self.ctx.arm and self.ctx.gripper and self.ctx.calibration
+                            and hasattr(self.ctx.inference, 'yolo')):
+                        from logic.object_interaction import TrashZone
+                        trash = TrashZone(
+                            pixel_x=self.ctx.config.trash_zone.pixel_x,
+                            pixel_y=self.ctx.config.trash_zone.pixel_y,
+                            enabled=True,
+                            detect_label=self.ctx.config.trash_zone.detect_label,
+                        )
+                        interaction = ObjectInteraction(
+                            arm=self.ctx.arm,
+                            gripper=self.ctx.gripper,
+                            calibration=self.ctx.calibration,
+                            dynamics=self.ctx.dynamics,
+                            personality=self.ctx.personality,
+                            yolo_detector=self.ctx.inference.yolo,
+                            narration=self.ctx.narration,
+                            trash_zone=trash,
+                        )
+                        camera_getter = lambda: self.ctx.cameras.get_frame(CameraRole.OVERHEAD)
+                        if interaction.should_auto_cleanup(
+                            personality=self.ctx.personality,
+                            last_cleanup_time=last_cleanup_time,
+                        ):
+                            # She decided to clean
+                            result = await interaction.auto_cleanup(
+                                camera_getter,
+                                personality=self.ctx.personality,
+                                narration=self.ctx.narration,
+                            )
+                            if result.success:
+                                import time as _time
+                                last_cleanup_time = _time.time()
 
             # If Tetris is active, run one cycle
             if tetris_active and tetris_controller is not None:
