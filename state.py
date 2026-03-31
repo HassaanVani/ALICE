@@ -64,6 +64,10 @@ class AliceState:
     active_habits: int = 0
     current_posture: str = ""
     engagement_action: str = "none"
+    # LLM interpreter
+    llm_mod_spd: float = 1.0
+    llm_mod_pos: float = 1.0
+    llm_mod_source: str = "default"
 
     def to_dict(self) -> dict:
         return {
@@ -111,6 +115,9 @@ class AliceState:
             "active_habits": self.active_habits,
             "current_posture": self.current_posture,
             "engagement_action": self.engagement_action,
+            "llm_mod_spd": self.llm_mod_spd,
+            "llm_mod_pos": self.llm_mod_pos,
+            "llm_mod_source": self.llm_mod_source,
         }
 
     def to_json(self) -> str:

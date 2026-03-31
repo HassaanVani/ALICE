@@ -69,6 +69,7 @@ class GazeTracker:
     def __init__(self, alpha: float = None, face_priority: float = 0.8):
         self._alpha = alpha or self.DEFAULT_ALPHA
         self._face_priority = face_priority
+        self._llm_interpreter = None
 
         # Current smoothed target angles
         self._current = list(self.NEUTRAL_ANGLES)
@@ -85,6 +86,10 @@ class GazeTracker:
         # Scan phase for idle behavior
         self._scan_phase: float = 0.0
         self._last_tick: float = 0.0
+
+    def set_llm_interpreter(self, interp) -> None:
+        """Attach LLM interpreter for dynamic scan modulation."""
+        self._llm_interpreter = interp
 
     def update_face(self, face_info: dict) -> None:
         """Feed face detection data.
@@ -170,9 +175,14 @@ class GazeTracker:
             label = ""
             priority = 0.3
         else:
-            # Idle scan — sinusoidal sweep
-            scan_j1 = self.SCAN_AMPLITUDE * math.sin(
-                2 * math.pi * self._scan_phase / self.SCAN_PERIOD
+            # Idle scan — sinusoidal sweep, modulated by LLM
+            scan_amp = self.SCAN_AMPLITUDE
+            scan_per = self.SCAN_PERIOD
+            if self._llm_interpreter is not None:
+                scan_amp *= self._llm_interpreter.modifiers.scn
+                scan_per *= self._llm_interpreter.modifiers.per
+            scan_j1 = scan_amp * math.sin(
+                2 * math.pi * self._scan_phase / scan_per
             )
             raw_target = (scan_j1, self.NEUTRAL_ANGLES[1],
                           self.NEUTRAL_ANGLES[2], self.NEUTRAL_ANGLES[3])

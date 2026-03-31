@@ -102,6 +102,9 @@ class ALICE:
         self.personality = PersonalityEngine()
         self.dynamics: Optional[MovementDynamics] = None
 
+        # LLM movement interpreter
+        self.llm_interpreter = None
+
         # Living behaviors (initialized in initialize() if enabled)
         self.object_memory = None
         self.gaze_tracker = None
@@ -315,6 +318,43 @@ class ALICE:
 
                 logger.info("Living behaviors initialized")
 
+            # --- LLM Movement Interpreter ---
+            if self.config.llm_interpreter.enabled:
+                from logic.llm_interpreter import LLMInterpreter
+
+                lic = self.config.llm_interpreter
+                self.llm_interpreter = LLMInterpreter(
+                    model=lic.model,
+                    base_url=lic.base_url,
+                    interval_s=lic.interval_s,
+                    timeout_s=lic.timeout_s,
+                    num_predict=lic.num_predict,
+                    temperature=lic.temperature,
+                    min_val=lic.min_modifier,
+                    max_val=lic.max_modifier,
+                )
+                self.llm_interpreter.attach(
+                    personality=self.personality,
+                    curiosity_engine=self.curiosity_engine,
+                    gaze_tracker=self.gaze_tracker,
+                    body_language=self.body_language,
+                    object_memory=self.object_memory,
+                    presence_detector=self.presence_detector,
+                )
+
+                # Wire into consumer systems
+                self.dynamics.set_llm_interpreter(self.llm_interpreter)
+                if self.body_language:
+                    self.body_language.set_llm_interpreter(self.llm_interpreter)
+                if self.gaze_tracker:
+                    self.gaze_tracker.set_llm_interpreter(self.llm_interpreter)
+                if self.sound_effects_engine:
+                    self.sound_effects_engine.set_llm_interpreter(self.llm_interpreter)
+                if self.proactive:
+                    self.proactive.set_llm_interpreter(self.llm_interpreter)
+
+                logger.info("LLM movement interpreter initialized")
+
             # Load RL agent if available
             self._load_rl_agent()
 
@@ -430,6 +470,11 @@ class ALICE:
             asyncio.create_task(self.voice_input.start(), name="voice_input"),
         ]
 
+        if self.llm_interpreter is not None:
+            self._tasks.append(
+                asyncio.create_task(self.llm_interpreter.start(), name="llm_interpreter")
+            )
+
         try:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         except asyncio.CancelledError:
@@ -479,6 +524,7 @@ class ALICE:
             proactive=self.proactive,
             object_memory=self.object_memory,
             presence_detector=self.presence_detector,
+            llm_interpreter=self.llm_interpreter,
         )
 
     async def _mode_loop(self) -> None:
@@ -502,6 +548,10 @@ class ALICE:
         SHUTDOWN_TIMEOUT = 5.0  # seconds to wait before force-cancelling tasks
         logger.info("Shutting down")
         self._running = False
+
+        # Stop LLM interpreter
+        if self.llm_interpreter:
+            await self.llm_interpreter.stop()
 
         # Save living behavior state
         if self.curiosity_engine:

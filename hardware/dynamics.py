@@ -40,6 +40,7 @@ class MovementDynamics:
         self._last_interest_angles: Optional[Tuple[float, ...]] = None
         self._body_language = None   # Optional[BodyLanguage]
         self._gaze_tracker = None    # Optional[GazeTracker]
+        self._llm_interpreter = None # Optional[LLMInterpreter]
 
     def set_body_language(self, bl) -> None:
         """Attach body language system for posture overlays."""
@@ -48,6 +49,10 @@ class MovementDynamics:
     def set_gaze_tracker(self, gt) -> None:
         """Attach gaze tracker for idle head following."""
         self._gaze_tracker = gt
+
+    def set_llm_interpreter(self, interp) -> None:
+        """Attach LLM interpreter for dynamic movement modulation."""
+        self._llm_interpreter = interp
 
     @property
     def arm(self) -> ArmController:
@@ -82,6 +87,10 @@ class MovementDynamics:
             hesitation = self._personality.get_hesitation(origin)
             self._personality.on_task_start(origin)
 
+        # LLM modulation of hesitation
+        if self._llm_interpreter is not None:
+            hesitation *= self._llm_interpreter.modifiers.hes
+
         # Apply hesitation — the pause before acting
         if hesitation > 0:
             logger.debug(f"Hesitating {hesitation:.1f}s ({origin.value})")
@@ -89,7 +98,13 @@ class MovementDynamics:
 
         # Calculate effective speed
         base = speed if speed is not None else self.BASE_SPEED
-        effective_speed = max(5, min(100, base * speed_mult))
+        effective_speed = base * speed_mult
+
+        # LLM modulation of speed
+        if self._llm_interpreter is not None:
+            effective_speed *= self._llm_interpreter.modifiers.spd
+
+        effective_speed = max(5, min(100, effective_speed))
 
         logger.debug(
             f"Moving: speed={effective_speed:.0f} "

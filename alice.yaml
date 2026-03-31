@@ -106,6 +106,17 @@ voice_input:
   silence_timeout_s: 1.5
   max_record_s: 10.0
 
+llm_interpreter:
+  enabled: false
+  model: "llama3.2:3b"
+  base_url: "http://localhost:11434"
+  interval_s: 4.0              # seconds between LLM modulation queries
+  timeout_s: 0.5               # max wait per query (defaults if exceeded)
+  num_predict: 40              # max output tokens
+  temperature: 0.3             # low for consistent structured output
+  min_modifier: 0.3            # floor for all modifiers
+  max_modifier: 2.0            # ceiling for all modifiers
+
 sound_effects:
   enabled: false
   intensity: 1.0              # servo vibration amplitude scale (0.0-1.0)

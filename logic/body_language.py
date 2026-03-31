@@ -119,6 +119,11 @@ class BodyLanguage:
     def __init__(self):
         self._active: List[_ActiveOverlay] = []
         self._enabled = True
+        self._llm_interpreter = None
+
+    def set_llm_interpreter(self, interp) -> None:
+        """Attach LLM interpreter for dynamic posture strength modulation."""
+        self._llm_interpreter = interp
 
     @property
     def enabled(self) -> bool:
@@ -226,6 +231,11 @@ class BodyLanguage:
             j2 += active.overlay.j2_offset * s
             j3 += active.overlay.j3_offset * s
             j4 += active.overlay.j4_offset * s
+
+        # LLM modulation of posture strength
+        if self._llm_interpreter is not None:
+            m = self._llm_interpreter.modifiers.pos
+            j1, j2, j3, j4 = j1 * m, j2 * m, j3 * m, j4 * m
 
         # Clamp total offset to prevent wild swings
         max_offset = 10.0

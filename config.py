@@ -115,6 +115,19 @@ class TrashZoneConfig:
 
 
 @dataclass
+class LLMInterpreterConfig:
+    enabled: bool = False
+    model: str = "llama3.2:3b"
+    base_url: str = "http://localhost:11434"
+    interval_s: float = 4.0
+    timeout_s: float = 0.5
+    num_predict: int = 40
+    temperature: float = 0.3
+    min_modifier: float = 0.3
+    max_modifier: float = 2.0
+
+
+@dataclass
 class SoundEffectsConfig:
     enabled: bool = False
     intensity: float = 1.0
@@ -166,6 +179,7 @@ class AliceConfig:
     voice_input: VoiceInputConfig = field(default_factory=VoiceInputConfig)
     sound_effects: SoundEffectsConfig = field(default_factory=SoundEffectsConfig)
     living_behaviors: LivingBehaviorsConfig = field(default_factory=LivingBehaviorsConfig)
+    llm_interpreter: LLMInterpreterConfig = field(default_factory=LLMInterpreterConfig)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -342,6 +356,19 @@ def _dict_to_config(data: dict) -> AliceConfig:
         max_record_s=vi_data.get("max_record_s", 10.0),
     )
 
+    li_data = data.get("llm_interpreter", {})
+    llm_interpreter = LLMInterpreterConfig(
+        enabled=li_data.get("enabled", False),
+        model=li_data.get("model", "llama3.2:3b"),
+        base_url=li_data.get("base_url", "http://localhost:11434"),
+        interval_s=li_data.get("interval_s", 4.0),
+        timeout_s=li_data.get("timeout_s", 0.5),
+        num_predict=li_data.get("num_predict", 40),
+        temperature=li_data.get("temperature", 0.3),
+        min_modifier=li_data.get("min_modifier", 0.3),
+        max_modifier=li_data.get("max_modifier", 2.0),
+    )
+
     se_data = data.get("sound_effects", {})
     sound_effects = SoundEffectsConfig(
         enabled=se_data.get("enabled", False),
@@ -378,6 +405,7 @@ def _dict_to_config(data: dict) -> AliceConfig:
         voice_input=voice_input,
         sound_effects=sound_effects,
         living_behaviors=living_behaviors,
+        llm_interpreter=llm_interpreter,
     )
 
 

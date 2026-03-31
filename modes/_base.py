@@ -61,6 +61,7 @@ class ModeContext:
     proactive: Any = None
     object_memory: Any = None
     presence_detector: Any = None
+    llm_interpreter: Any = None
 
     def running(self) -> bool:
         """True while the system is running AND still in this mode."""

@@ -90,6 +90,11 @@ class ProactiveEngagement:
         self._examine_minute_start: float = 0.0
         self._last_look_time: float = 0.0
         self._executing = False
+        self._llm_interpreter = None
+
+    def set_llm_interpreter(self, interp) -> None:
+        """Attach LLM interpreter for dynamic examination modulation."""
+        self._llm_interpreter = interp
 
     @property
     def is_executing(self) -> bool:
@@ -198,10 +203,15 @@ class ProactiveEngagement:
             await self._gaze.apply(dynamics)
             await asyncio.sleep(0.1)
 
-        # 4. Small tilt — the "head tilt" of curiosity
+        # 4. Small tilt — the "head tilt" of curiosity (LLM-modulated)
         current = dynamics.arm.position.as_tuple()
-        tilted = (current[0], current[1], current[2], current[3] + 8.0)
-        dynamics.arm.move_to(tilted, speed=25)
+        tilt_amount = 8.0
+        approach_speed = 25
+        if self._llm_interpreter is not None:
+            tilt_amount *= self._llm_interpreter.modifiers.tilt
+            approach_speed = int(approach_speed * self._llm_interpreter.modifiers.appr)
+        tilted = (current[0], current[1], current[2], current[3] + tilt_amount)
+        dynamics.arm.move_to(tilted, speed=approach_speed)
         await asyncio.sleep(0.5)
 
         # 5. Hold — forming an opinion

@@ -129,6 +129,7 @@ class SoundEffects:
         self._arm = arm
         self._enabled = enabled
         self._intensity = max(0.0, min(1.0, intensity))  # scales amplitude
+        self._llm_interpreter = None
         self._playing = False
         self._last_play_time: float = 0.0
         self._min_interval: float = 0.3  # don't overlap sounds
@@ -139,6 +140,10 @@ class SoundEffects:
 
     def set_arm(self, arm: "ArmController") -> None:
         self._arm = arm
+
+    def set_llm_interpreter(self, interp) -> None:
+        """Attach LLM interpreter for dynamic sound intensity modulation."""
+        self._llm_interpreter = interp
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
@@ -187,6 +192,8 @@ class SoundEffects:
         base_pos = self._arm.position.as_tuple()
         center = base_pos[pattern.joint]
         amplitude = pattern.amplitude_deg * self._intensity
+        if self._llm_interpreter is not None:
+            amplitude *= self._llm_interpreter.modifiers.sfx
 
         for rep in range(pattern.repeat):
             if rep > 0 and pattern.gap_s > 0:

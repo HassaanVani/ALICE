@@ -25,6 +25,7 @@ from .curiosity import CuriosityEngine, CuriosityRecord
 from .habits import HabitEngine, Habit, BehaviorPattern
 from .body_language import BodyLanguage, PostureOverlay
 from .proactive import ProactiveEngagement, EngagementAction, EngagementDecision
+from .llm_interpreter import LLMInterpreter, MovementModifiers
 
 try:
     from .sort_env import ChimpSortEnv

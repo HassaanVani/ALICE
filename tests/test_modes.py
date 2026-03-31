@@ -104,6 +104,7 @@ def mock_context(*, running_calls=1):
     ctx.proactive = None
     ctx.object_memory = None
     ctx.presence_detector = None
+    ctx.llm_interpreter = None
 
     return ctx
 
