@@ -19,9 +19,6 @@ class AliceState:
         "arm_mounted": "unknown",
         "front": "unknown"
     })
-    sort_state: str = "idle"
-    sort_move_count: int = 0
-    sort_start_time: float = 0.0
     tetris_score: int = 0
     tetris_lines: int = 0
     tetris_level: int = 1
@@ -31,10 +28,6 @@ class AliceState:
     puppeteer_recording: bool = False
     calibration_points: int = 0
     calibration_ready: bool = False
-    rebellion_crowd_choice: Optional[int] = None
-    rebellion_robot_choice: Optional[int] = None
-    auto_sort_phase: str = "idle"
-    auto_sort_cycle: int = 0
     demo_act: int = 0
     demo_act_label: str = ""
     detected_blocks: List[Dict] = field(default_factory=list)
@@ -76,9 +69,6 @@ class AliceState:
             "arm_state": self.arm_state,
             "gripper_position": self.gripper_position,
             "cameras": self.cameras,
-            "sort_state": self.sort_state,
-            "sort_move_count": self.sort_move_count,
-            "sort_start_time": self.sort_start_time,
             "tetris_score": self.tetris_score,
             "tetris_lines": self.tetris_lines,
             "tetris_level": self.tetris_level,
@@ -88,10 +78,6 @@ class AliceState:
             "puppeteer_recording": self.puppeteer_recording,
             "calibration_points": self.calibration_points,
             "calibration_ready": self.calibration_ready,
-            "rebellion_crowd_choice": self.rebellion_crowd_choice,
-            "rebellion_robot_choice": self.rebellion_robot_choice,
-            "auto_sort_phase": self.auto_sort_phase,
-            "auto_sort_cycle": self.auto_sort_cycle,
             "demo_act": self.demo_act,
             "demo_act_label": self.demo_act_label,
             "detected_blocks": self.detected_blocks,
@@ -163,10 +149,6 @@ class AliceStateManager:
         self._state.cameras = health
         self._notify()
 
-    def update_sort_state(self, sort_state: str) -> None:
-        self._state.sort_state = sort_state
-        self._notify()
-
     def update_tetris_score(self, score: int) -> None:
         self._state.tetris_score = score
         self._notify()
@@ -184,28 +166,13 @@ class AliceStateManager:
             self._state.tetris_board = board
         self._notify()
 
-    def update_sort_progress(self, move_count: int = 0, start_time: float = 0.0) -> None:
-        self._state.sort_move_count = move_count
-        self._state.sort_start_time = start_time
-        self._notify()
-
     def update_puppeteer_recording(self, recording: bool) -> None:
         self._state.puppeteer_recording = recording
-        self._notify()
-
-    def update_rebellion(self, crowd_choice: Optional[int], robot_choice: Optional[int]) -> None:
-        self._state.rebellion_crowd_choice = crowd_choice
-        self._state.rebellion_robot_choice = robot_choice
         self._notify()
 
     def update_calibration(self, points: int = 0, ready: bool = False) -> None:
         self._state.calibration_points = points
         self._state.calibration_ready = ready
-        self._notify()
-
-    def update_auto_sort(self, phase: str, cycle: int = 0) -> None:
-        self._state.auto_sort_phase = phase
-        self._state.auto_sort_cycle = cycle
         self._notify()
 
     def update_demo_act(self, act: int, label: str = "") -> None:

@@ -264,11 +264,7 @@ class NarrationService:
 
     def _build_prompt(self, state) -> Optional[str]:
         """Build a mode-specific prompt from current state."""
-        from narration_prompts import (
-            chimp_sort_prompt, puppeteer_prompt,
-            calibration_prompt, mode_switch_prompt, rebellion_prompt,
-            awaiting_puppeteer_prompt, auto_sort_prompt, auto_tetris_prompt
-        )
+        from narration_prompts import mode_switch_prompt
 
         # Check for mode switch
         if self._last_mode is not None and self._last_mode != state.mode:
@@ -278,51 +274,9 @@ class NarrationService:
 
         self._last_mode = state.mode
 
-        if state.mode == "demo":
-            if state.sort_state == "rebellion":
-                return rebellion_prompt(
-                    blocks_remaining=16 - len([b for b in state.detected_blocks
-                                               if b.get("in_sorted_zone", False)]),
-                    crowd_choice=state.rebellion_crowd_choice,
-                    robot_choice=state.rebellion_robot_choice,
-                    move_count=state.sort_move_count,
-                )
-            if state.sort_state == "awaiting_puppeteer":
-                return awaiting_puppeteer_prompt()
-            elapsed = time.time() - state.sort_start_time if state.sort_start_time else 0.0
-            return chimp_sort_prompt(
-                sort_state=state.sort_state,
-                blocks_placed=len([b for b in state.detected_blocks
-                                   if b.get("in_sorted_zone", False)]),
-                total_blocks=len(state.detected_blocks) or 16,
-                duration=elapsed,
-                move_count=state.sort_move_count,
-            )
-        elif state.mode == "auto_sort":
-            return auto_sort_prompt(
-                phase=state.auto_sort_phase,
-                cycle=state.auto_sort_cycle,
-                blocks_detected=len(state.detected_blocks),
-                move_count=state.sort_move_count,
-            )
-        elif state.mode == "auto_tetris":
-            return auto_tetris_prompt(
-                score=state.tetris_score,
-                lines_cleared=state.tetris_lines,
-                level=state.tetris_level,
-                game_over=state.tetris_game_over,
-            )
-        elif state.mode == "puppeteer":
-            return puppeteer_prompt(
-                state=state.puppeteer_state,
-                arm_angles=list(state.arm_position),
-                recording=state.puppeteer_recording,
-            )
-        elif state.mode == "calibrate":
-            return calibration_prompt(
-                points_collected=state.calibration_points,
-                transform_ready=state.calibration_ready,
-            )
+        # ALICE speaks through body language in most modes.
+        # Narration prompts are reserved for personality-driven moments
+        # triggered by should_speak() — not continuous mode narration.
         return None
 
     LLM_TIMEOUT = 10.0
@@ -406,22 +360,7 @@ class NarrationService:
             if not self._personality.should_speak(topic=state.mode):
                 return None
 
-        if state.mode == "demo":
-            if state.sort_state == "rebellion":
-                if (state.rebellion_crowd_choice and state.rebellion_robot_choice
-                        and state.rebellion_crowd_choice != state.rebellion_robot_choice):
-                    return "no."
-            elif state.sort_state == "complete":
-                return None
-        elif state.mode == "auto_sort":
-            return None
-        elif state.mode == "auto_tetris":
-            return None
-        elif state.mode == "puppeteer":
-            return None
-        elif state.mode == "calibrate":
-            return None
-
+        # Fallback is silence for all modes — ALICE speaks through body language
         return None
 
     async def speak(self, text: str) -> None:

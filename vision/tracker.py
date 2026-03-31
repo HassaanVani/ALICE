@@ -1,8 +1,8 @@
 """Real-time object tracking with Kalman filter and greedy association.
 
-Supports both legacy BlockData (ArUco markers, block_id: int) and new
-Detection objects (YOLO, label: str). The tracker uses spatial proximity
-and label/ID matching for frame-to-frame association.
+Tracks Detection objects (YOLO) using spatial proximity and label matching
+for frame-to-frame association. Duck-typed: any object with center_x,
+center_y, confidence attributes works.
 """
 
 import logging
@@ -12,8 +12,6 @@ from typing import List, Dict, Optional, Tuple, Union
 
 import cv2
 import numpy as np
-
-from .aruco_detector import BlockData
 
 logger = logging.getLogger("Tracker")
 

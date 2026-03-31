@@ -12,13 +12,13 @@ from state import AliceStateManager
 from recording import SessionRecorder, SessionPlayer
 from hardware import (ArmController, MagnetDriver, SuctionDriver, CalibrationManager,
                       create_gripper, KinestheticTeacher)
-from vision import CameraManager, CameraConfig, CameraRole, ArucoDetector, BlockTracker
+from vision import CameraManager, CameraConfig, CameraRole, BlockTracker
 from brain import InferencePipeline
-from logic import ChimpSortFSM, SortState, TetrisAgent, PersonalityEngine, ActionOrigin
+from logic import TetrisAgent, PersonalityEngine, ActionOrigin
 from hardware.dynamics import MovementDynamics
 from server import TensorStreamServer
-from modes import (ModeContext, DemoState, IdleRunner, AutoSortRunner,
-                   AutoTetrisRunner, DemoRunner, CalibrateRunner, PuppeteerRunner,
+from modes import (ModeContext, DemoState, IdleRunner,
+                   AutoTetrisRunner, CalibrateRunner, PuppeteerRunner,
                    PerformanceRunner)
 from puppet_server import PuppetServer
 from audience_server import AudienceServer
@@ -31,14 +31,11 @@ logger = logging.getLogger("ALICE")
 
 WEIGHTS_PATH = Path(__file__).parent / "brain" / "weights" / "block_recognizer.pth"
 STATE_WEIGHTS_PATH = Path(__file__).parent / "brain" / "weights" / "block_state.pth"
-RL_AGENT_PATH = Path(__file__).parent / "brain" / "weights" / "sort_agent.zip"
 
 
 class Mode(Enum):
     IDLE = "idle"
-    AUTO_SORT = "auto_sort"
     AUTO_TETRIS = "auto_tetris"
-    DEMO = "demo"
     CALIBRATE = "calibrate"
     PUPPETEER = "puppeteer"
     PERFORMANCE = "performance"
@@ -56,10 +53,8 @@ class ALICE:
         self.gripper = None
         self.calibration: Optional[CalibrationManager] = None
         self.cameras: Optional[CameraManager] = None
-        self.detector: Optional[ArucoDetector] = None
         self.tracker: Optional[BlockTracker] = None
         self.inference: Optional[InferencePipeline] = None
-        self.sort_fsm: Optional[ChimpSortFSM] = None
         self.tetris: Optional[TetrisAgent] = None
         self.kinesthetic: Optional[KinestheticTeacher] = None
 
@@ -121,10 +116,7 @@ class ALICE:
         # Voice input
         self.voice_input = VoiceInputService(config.voice_input)
 
-        # RL agent
-        self._rl_agent = None
-
-        # Demo state — survives mode switches (for puppeteer interlude)
+        # Demo state — survives mode switches
         self._demo_state = DemoState()
 
     async def initialize(self) -> bool:
@@ -185,7 +177,6 @@ class ALICE:
             self.cameras.add_camera(arm_cam)
             self.cameras.add_camera(front)
 
-            self.detector = ArucoDetector()
             self.tracker = BlockTracker()
             self.inference = InferencePipeline()
 
@@ -355,9 +346,6 @@ class ALICE:
 
                 logger.info("LLM movement interpreter initialized")
 
-            # Load RL agent if available
-            self._load_rl_agent()
-
             # Setup current mode
             self._setup_mode(self.mode)
 
@@ -374,12 +362,7 @@ class ALICE:
 
     def _setup_mode(self, mode: Mode) -> None:
         """Initialize subsystems for a given mode."""
-        if mode in (Mode.AUTO_SORT, Mode.DEMO):
-            self.sort_fsm = ChimpSortFSM()
-            self.sort_fsm.on_state_change(self._on_sort_state_change)
-            self.sort_fsm.on_move(self._on_block_move)
-
-        elif mode == Mode.AUTO_TETRIS:
+        if mode == Mode.AUTO_TETRIS:
             self.tetris = TetrisAgent()
             self.tetris.on_action(self._on_tetris_action)
 
@@ -387,7 +370,6 @@ class ALICE:
         """Clean up current mode's subsystems."""
         if self.mode == Mode.PUPPETEER:
             self.puppet_server.stop_puppet()
-        self.sort_fsm = None
         self.tetris = None
 
     def _handle_mode_switch(self, new_mode_str: str) -> None:
@@ -407,23 +389,6 @@ class ALICE:
         self.mode = new_mode
         self._setup_mode(new_mode)
         self.state_manager.update_mode(new_mode.value)
-
-    def _load_rl_agent(self) -> None:
-        if RL_AGENT_PATH.exists():
-            try:
-                from logic.sort_rl import load_agent
-                self._rl_agent = load_agent(RL_AGENT_PATH)
-                if self._rl_agent:
-                    logger.info("RL agent loaded")
-            except Exception as e:
-                logger.warning(f"Failed to load RL agent: {e}")
-
-    def _on_sort_state_change(self, state: SortState) -> None:
-        logger.info(f"Sort state: {state.value}")
-        self.state_manager.update_sort_state(state.value)
-
-    def _on_block_move(self, move) -> None:
-        logger.debug(f"Block {move.block_id}: {move.from_pos} -> {move.to_pos}")
 
     def _on_tetris_action(self, action) -> None:
         logger.debug(f"Tetris action: {action.name}")
@@ -482,9 +447,7 @@ class ALICE:
 
     _MODE_RUNNERS = {
         Mode.IDLE: IdleRunner,
-        Mode.AUTO_SORT: AutoSortRunner,
         Mode.AUTO_TETRIS: AutoTetrisRunner,
-        Mode.DEMO: DemoRunner,
         Mode.CALIBRATE: CalibrateRunner,
         Mode.PUPPETEER: PuppeteerRunner,
         Mode.PERFORMANCE: PerformanceRunner,
@@ -499,10 +462,10 @@ class ALICE:
             gripper=self.gripper,
             calibration=self.calibration,
             cameras=self.cameras,
-            detector=self.detector,
+            detector=None,
             tracker=self.tracker,
             inference=self.inference,
-            sort_fsm=self.sort_fsm,
+            sort_fsm=None,
             tetris=self.tetris,
             kinesthetic=self.kinesthetic,
             state_manager=self.state_manager,
@@ -511,7 +474,7 @@ class ALICE:
             narration=self.narration,
             puppet_server=self.puppet_server,
             ws_server=self._ws_server,
-            rl_agent=self._rl_agent,
+            rl_agent=None,
             personality=self.personality,
             dynamics=self.dynamics,
             is_running=lambda: self._running,
@@ -533,10 +496,7 @@ class ALICE:
             try:
                 ctx = self._build_context()
                 runner_cls = self._MODE_RUNNERS[self.mode]
-                if runner_cls is DemoRunner:
-                    runner = runner_cls(ctx, self._demo_state)
-                else:
-                    runner = runner_cls(ctx)
+                runner = runner_cls(ctx)
                 await runner.run()
             except asyncio.CancelledError:
                 break
@@ -607,7 +567,7 @@ class ALICE:
 async def main():
     parser = argparse.ArgumentParser(description="A.L.I.C.E. - Adaptive Learning Interface for Cognitive Exploration")
     parser.add_argument("--config", type=str, default=None, help="Path to alice.yaml config file")
-    parser.add_argument("--mode", type=str, choices=["idle", "auto_sort", "auto_tetris", "demo", "calibrate", "puppeteer", "performance"], default=None)
+    parser.add_argument("--mode", type=str, choices=["idle", "auto_tetris", "calibrate", "puppeteer", "performance"], default=None)
     parser.add_argument("--simulate", action="store_true", default=None)
     parser.add_argument("--ws-port", type=int, default=None)
     parser.add_argument("--arm-port", type=str, default=None, help="Serial port for arm controller")

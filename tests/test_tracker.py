@@ -2,21 +2,18 @@
 
 import numpy as np
 import pytest
+from types import SimpleNamespace
 
-from vision.aruco_detector import BlockData
 from vision.tracker import BlockTracker, TrackedBlock, MAX_MISSING_FRAMES
 
 
 def _make_detection(block_id, cx, cy, conf=1.0):
-    return BlockData(
+    return SimpleNamespace(
         block_id=block_id,
-        marker_id=block_id - 1,
         center_x=cx,
         center_y=cy,
-        corners=np.array([[cx-10, cy-10], [cx+10, cy-10],
-                          [cx+10, cy+10], [cx-10, cy+10]], dtype=np.float32),
-        rotation=0.0,
         confidence=conf,
+        label=str(block_id),
     )
 
 

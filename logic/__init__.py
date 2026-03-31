@@ -1,7 +1,5 @@
-from .sort_logic import ChimpSortFSM, SortState, SortingSession
 from .tetris_agent import TetrisAgent
-from .rl_models import SortQNetwork, SortDuelingQNetwork
-from .arm_routines import pick_and_place, auto_scramble, auto_solve, PickPlaceConfig
+from .arm_routines import pick_and_place, PickPlaceConfig
 from .tetris_controller import TetrisController
 from .personality import (
     PersonalityEngine, PersonalityState, EmotionalState,
@@ -26,8 +24,3 @@ from .habits import HabitEngine, Habit, BehaviorPattern
 from .body_language import BodyLanguage, PostureOverlay
 from .proactive import ProactiveEngagement, EngagementAction, EngagementDecision
 from .llm_interpreter import LLMInterpreter, MovementModifiers
-
-try:
-    from .sort_env import ChimpSortEnv
-except ImportError:
-    ChimpSortEnv = None

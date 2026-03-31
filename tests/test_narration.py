@@ -59,69 +59,43 @@ class TestNarrationInterval:
         service = NarrationService(enabled=True, min_interval=0)
         sm = MagicMock()
         state = MagicMock()
-        state.mode = "auto_sort"
-        state.auto_sort_phase = "scrambling"
-        state.auto_sort_cycle = 1
-        state.detected_blocks = []
-        state.sort_move_count = 0
+        state.mode = "idle"
         sm.state = state
         service.set_state_manager(sm)
         service._last_narration_time = 0.0
-        service._last_mode = "auto_sort"
+        service._last_mode = "idle"
 
-        # _generate_text is async, so use AsyncMock
         service._generate_text = AsyncMock(return_value=None)
-
-        # Just verify it doesn't error
         await service._check_and_narrate()
 
 
 class TestNarrationFallback:
-    def test_narration_fallback_auto_sort_silence(self):
-        """ALICE doesn't narrate her own sorting — silence is correct."""
+    def test_narration_fallback_silence(self):
+        """ALICE speaks through body language — fallback is always silence."""
         service = NarrationService(enabled=True)
         sm = MagicMock()
         state = MagicMock()
-        state.mode = "auto_sort"
-        state.auto_sort_phase = "scrambling"
-        state.auto_sort_cycle = 1
-        state.sort_move_count = 5
+        state.mode = "idle"
         sm.state = state
         service.set_state_manager(sm)
 
         text = service._fallback_narration()
-        assert text is None  # ALICE stays silent during routine work
+        assert text is None
 
     def test_fallback_returns_none_without_state_manager(self):
         service = NarrationService(enabled=True)
         text = service._fallback_narration()
         assert text is None
 
-    def test_fallback_demo_rebellion_override(self):
-        """ALICE speaks during rebellion when crowd is overridden."""
-        service = NarrationService(enabled=True)
-        sm = MagicMock()
-        state = MagicMock()
-        state.mode = "demo"
-        state.sort_state = "rebellion"
-        state.rebellion_crowd_choice = 3
-        state.rebellion_robot_choice = 7
-        sm.state = state
-        service.set_state_manager(sm)
+    def test_fallback_all_modes_silence(self):
+        """ALICE speaks through body language — fallback is silence for all modes."""
+        for mode in ["idle", "performance", "puppeteer", "calibrate", "auto_tetris"]:
+            service = NarrationService(enabled=True)
+            sm = MagicMock()
+            state = MagicMock()
+            state.mode = mode
+            sm.state = state
+            service.set_state_manager(sm)
 
-        text = service._fallback_narration()
-        assert text == "no."
-
-    def test_fallback_puppeteer_silence(self):
-        """ALICE stays silent during puppeteer — she's being guided."""
-        service = NarrationService(enabled=True)
-        sm = MagicMock()
-        state = MagicMock()
-        state.mode = "puppeteer"
-        state.puppeteer_state = "live"
-        state.puppeteer_recording = False
-        sm.state = state
-        service.set_state_manager(sm)
-
-        text = service._fallback_narration()
-        assert text is None  # silence — she's learning
+            text = service._fallback_narration()
+            assert text is None, f"Expected silence for mode '{mode}'"

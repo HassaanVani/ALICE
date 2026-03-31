@@ -1,4 +1,4 @@
-"""Tests for all mode runners in modes/ — IdleRunner, AutoSortRunner, AutoTetrisRunner, PuppeteerRunner, DemoRunner."""
+"""Tests for mode runners — IdleRunner, AutoTetrisRunner, PuppeteerRunner."""
 
 import asyncio
 from unittest.mock import MagicMock, AsyncMock, PropertyMock, patch
@@ -130,48 +130,6 @@ class TestIdleRunner:
         ctx.inference.predict.assert_not_called()
 
 
-# ── AutoSortRunner ─────────────────────────────────────────────
-
-class TestAutoSortRunner:
-    @pytest.mark.asyncio
-    async def test_auto_sort_calls_scramble_then_solve(self):
-        from modes.auto_sort import AutoSortRunner
-
-        # Need enough running calls: while check + scramble running_check + post-scramble check
-        # + solve running_check + post-solve check + pause checks
-        ctx = mock_context(running_calls=10)
-
-        with patch("modes.auto_sort.auto_scramble", new_callable=AsyncMock, return_value=3) as mock_scramble, \
-             patch("modes.auto_sort.auto_solve", new_callable=AsyncMock, return_value=3) as mock_solve:
-            runner = AutoSortRunner(ctx)
-            await runner.run()
-            mock_scramble.assert_called()
-            mock_solve.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_auto_sort_updates_state(self):
-        from modes.auto_sort import AutoSortRunner
-
-        ctx = mock_context(running_calls=1)
-
-        with patch("modes.auto_sort.auto_scramble", new_callable=AsyncMock, return_value=0), \
-             patch("modes.auto_sort.auto_solve", new_callable=AsyncMock, return_value=0):
-            runner = AutoSortRunner(ctx)
-            await runner.run()
-            ctx.state_manager.update_auto_sort.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_auto_sort_exits_on_not_running(self):
-        from modes.auto_sort import AutoSortRunner
-
-        ctx = mock_context(running_calls=0)
-
-        with patch("modes.auto_sort.auto_scramble", new_callable=AsyncMock) as mock_scramble:
-            runner = AutoSortRunner(ctx)
-            await runner.run()
-            mock_scramble.assert_not_called()
-
-
 # ── AutoTetrisRunner ───────────────────────────────────────────
 
 class TestAutoTetrisRunner:
@@ -216,45 +174,3 @@ class TestPuppeteerRunner:
         ctx.puppet_server.stop_puppet.assert_called_once()
 
 
-# ── DemoRunner ─────────────────────────────────────────────────
-
-class TestDemoRunner:
-    @pytest.mark.asyncio
-    async def test_demo_scrambles_before_act1(self):
-        from modes.demo import DemoRunner
-
-        ctx = mock_context(running_calls=1)
-        demo_state = DemoState()
-
-        with patch("modes.demo.auto_scramble", new_callable=AsyncMock, return_value=5) as mock_scramble:
-            runner = DemoRunner(ctx, demo_state)
-            await runner.run()
-            mock_scramble.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_demo_act1_starts_human_benchmark(self):
-        from modes.demo import DemoRunner
-
-        ctx = mock_context(running_calls=2)
-        demo_state = DemoState()
-
-        with patch("modes.demo.auto_scramble", new_callable=AsyncMock, return_value=5), \
-             patch("modes.demo.sort_loop", new_callable=AsyncMock, return_value=None):
-            runner = DemoRunner(ctx, demo_state)
-            await runner.run()
-            ctx.sort_fsm.start_human_benchmark.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_demo_resumes_at_act4(self):
-        from modes.demo import DemoRunner
-
-        ctx = mock_context(running_calls=1)
-        demo_state = DemoState(sort_act=3)
-
-        with patch("modes.demo.auto_scramble", new_callable=AsyncMock, return_value=0), \
-             patch("modes.demo.sort_loop", new_callable=AsyncMock, return_value=None), \
-             patch("modes.demo.rebellion_loop", new_callable=AsyncMock):
-            runner = DemoRunner(ctx, demo_state)
-            await runner.run()
-            # Should skip to _act4_and_5 path
-            assert demo_state.sort_act >= 3
