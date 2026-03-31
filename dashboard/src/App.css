@@ -102,6 +102,7 @@
   -webkit-text-fill-color: transparent;
   position: relative;
   user-select: none;
+  transform-origin: 10% 40%;
 }
 
 /* Glow behind the text */
@@ -159,6 +160,8 @@
 }
 
 .hero.exiting .hero-title {
+  /* Origin = the counter (hole) of the letter A: ~10% from left, ~40% from top */
+  transform-origin: 10% 40%;
   animation: titleZoom 1.2s var(--ease-out) forwards;
 }
 
@@ -175,7 +178,8 @@
 
 @keyframes titleZoom {
   0% { transform: scale(1); filter: blur(0); }
-  100% { transform: scale(12); filter: blur(20px); }
+  60% { filter: blur(0); }
+  100% { transform: scale(20); filter: blur(30px); }
 }
 
 @keyframes fadeUp {
