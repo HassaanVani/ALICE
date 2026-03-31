@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import BrainViewport from './components/BrainViewport.jsx';
 import SimulatedArm from './components/SimulatedArm/SimulatedArm.jsx';
 import CameraPanel from './components/CameraPanel.jsx';
+import PuppeteerView from './components/PuppeteerView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { ToastProvider } from './components/Toast.jsx';
 import { AliceSocketProvider } from './hooks/AliceSocketProvider.jsx';
@@ -244,6 +245,7 @@ function Dashboard({ entering }) {
 
   const mode = state.mode || 'idle';
   const isPerformance = mode === 'performance';
+  const isPuppeteer = mode === 'puppeteer';
 
   return (
     <div className={`dashboard ${entering ? 'entering' : ''}`}>
@@ -261,40 +263,53 @@ function Dashboard({ entering }) {
         </div>
       </header>
 
-      {/* Left column — Camera + Arm */}
-      <div className="dash-col">
-        <div className="panel panel-fill" style={{ padding: 0 }}>
-          <ErrorBoundary>
-            <div className="camera-wrap">
-              <CameraPanel frameRef={frameRef} />
-            </div>
-          </ErrorBoundary>
+      {isPuppeteer ? (
+        /* Puppeteer mode — hand tracking takes over left + center */
+        <div className="dash-col" style={{ gridColumn: '1 / 3' }}>
+          <div className="panel panel-fill" style={{ padding: 0 }}>
+            <ErrorBoundary>
+              <PuppeteerView />
+            </ErrorBoundary>
+          </div>
         </div>
-        <div className="panel panel-half" style={{ padding: 0 }}>
-          <ErrorBoundary>
-            <div className="viewport">
-              <SimulatedArm
-                angles={state.arm_position || [0, 0, 0, 0, 0]}
-                gripperOpen={state.gripper_position < 0.5}
-              />
-              <div className="viewport-tag">Arm Model</div>
+      ) : (
+        <>
+          {/* Left column — Camera + Arm */}
+          <div className="dash-col">
+            <div className="panel panel-fill" style={{ padding: 0 }}>
+              <ErrorBoundary>
+                <div className="camera-wrap">
+                  <CameraPanel frameRef={frameRef} />
+                </div>
+              </ErrorBoundary>
             </div>
-          </ErrorBoundary>
-        </div>
-      </div>
+            <div className="panel panel-half" style={{ padding: 0 }}>
+              <ErrorBoundary>
+                <div className="viewport">
+                  <SimulatedArm
+                    angles={state.arm_position || [0, 0, 0, 0, 0]}
+                    gripperOpen={state.gripper_position < 0.5}
+                  />
+                  <div className="viewport-tag">Arm Model</div>
+                </div>
+              </ErrorBoundary>
+            </div>
+          </div>
 
-      {/* Center column — Brain + Timeline */}
-      <div className="dash-col">
-        {isPerformance && <Timeline currentAct={state.demo_act || 0} />}
-        <div className="panel panel-fill" style={{ padding: 0 }}>
-          <ErrorBoundary>
-            <div className="viewport">
-              <BrainViewport activations={activations} />
-              <div className="viewport-tag">Neural Activity</div>
+          {/* Center column — Brain + Timeline */}
+          <div className="dash-col">
+            {isPerformance && <Timeline currentAct={state.demo_act || 0} />}
+            <div className="panel panel-fill" style={{ padding: 0 }}>
+              <ErrorBoundary>
+                <div className="viewport">
+                  <BrainViewport activations={activations} />
+                  <div className="viewport-tag">Neural Activity</div>
+                </div>
+              </ErrorBoundary>
             </div>
-          </ErrorBoundary>
-        </div>
-      </div>
+          </div>
+        </>
+      )}
 
       {/* Sidebar */}
       <div className="dash-col dash-sidebar">
