@@ -2,7 +2,7 @@
 
 Everything you need to go from unboxing to ALICE running on real hardware.
 
-> **Note:** ALICE now uses a dual-camera setup (arm-mounted + front-facing) and supports parallel grippers alongside the original suction pump. The YOLO detector replaces ArUco markers for real desk objects, though ArUco remains for legacy block-sorting modes.
+> **Note:** ALICE uses a dual-camera setup (arm-mounted + front-facing) and a parallel gripper. YOLO detects real desk objects. No ArUco markers needed.
 
 ---
 
@@ -19,7 +19,6 @@ You also need:
 - A computer with Python 3.10+ and ALICE installed
 - A small USB camera for arm-mounting (Logitech C270 or similar) — ALICE's eyes
 - A USB camera for front-facing mount (Logitech C922 or similar) — presence detection
-- Optional: 16 wooden cubes with ArUco markers for legacy block-sorting modes
 
 ---
 
@@ -87,8 +86,8 @@ Pump wiring (M5Stack GPIO header):
 2. Aim at chest/face height — this detects who is at the desk via MediaPipe
 3. Does not need to see the desk surface
 
-### Legacy: Overhead camera (optional, for block-sorting modes)
-1. If running ArUco block-sorting modes, clamp a camera directly above the workspace, pointing down
+### Overhead camera (optional)
+1. If you want an overhead view, clamp a camera directly above the workspace, pointing down
 2. Height: 50–70 cm above the table
 3. Make sure the entire arm reach area is visible in frame
 
@@ -212,7 +211,7 @@ You should see:
 [INFO] Starting main loop
 ```
 
-The arm is now live. Switch modes from the dashboard or restart with `--mode performance` for the new demo arc, or `--mode auto_sort` for legacy block sorting.
+The arm is now live. Switch modes from the dashboard or restart with `--mode performance` for the demo arc.
 
 ---
 
@@ -272,8 +271,8 @@ Now ALICE can translate "object at pixel (x, y)" into arm joint angles.
 **Pump doesn't turn on**
 → Check GPIO wiring. Try pin 2 instead of pin 5. Make sure GND and 5V are connected.
 
-**Arm moves but suction doesn't pick up blocks**
-→ Check tubing for leaks. Make sure the suction cup is making flush contact with the block surface. Blocks need a smooth, flat top.
+**Arm moves but gripper doesn't grip**
+→ Check gripper wiring and servo connection. Ensure the object is within the gripper's reach and size range.
 
 **`Expected 4 angles, got 5`**
 → Old calibration data from the 5-DOF arm. Delete `calibration_data.json` and `tetris_key_calibration.json`, then recalibrate.

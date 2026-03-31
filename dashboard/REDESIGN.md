@@ -1,5 +1,7 @@
 # Dashboard Redesign Plan
 
+> **Status: COMPLETE (2026-03-31).** The redesign described below has been implemented. The dashboard now features an Apple keynote-style hero screen with glassmorphic ALICE text, zoom-through animation, and a consumer-facing 3-column layout with inline panels for personality, living behaviors, object memory, LLM modifiers, and system status. 12 legacy components deleted, replaced with clean inline implementations.
+
 ## Vision
 
 Glassmorphism UI: dark, translucent panels, frosted glass depth. The glass brain sits in the center. Around it: object memory, spatial preferences, routine history. Personality indicators pulse subtly.
