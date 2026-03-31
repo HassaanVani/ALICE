@@ -1,348 +1,332 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import CameraPanel from './components/CameraPanel.jsx';
-import BlockOverlay from './components/BlockOverlay.jsx';
-import ArmOverlay from './components/ArmOverlay.jsx';
-import ActivationPanel from './components/ActivationPanel.jsx';
+import React, { useState, useEffect, useCallback } from 'react';
 import BrainViewport from './components/BrainViewport.jsx';
 import SimulatedArm from './components/SimulatedArm/SimulatedArm.jsx';
-import SystemState from './components/SystemState.jsx';
-import ModeControls from './components/ModeControls.jsx';
-import SortDashboard from './components/SortDashboard.jsx';
-import TetrisDashboard from './components/TetrisDashboard.jsx';
-import RecordingControls from './components/RecordingControls.jsx';
+import CameraPanel from './components/CameraPanel.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import PersonalityPanel from './components/PersonalityPanel.jsx';
-import ObjectMemoryPanel from './components/ObjectMemoryPanel.jsx';
-import DeskPresetSelector from './components/DeskPresetSelector.jsx';
-import PerformanceTimeline from './components/PerformanceTimeline.jsx';
-import { ToastProvider, useToast } from './components/Toast.jsx';
-import Audience from './pages/Audience.jsx';
+import { ToastProvider } from './components/Toast.jsx';
 import { AliceSocketProvider } from './hooks/AliceSocketProvider.jsx';
 import { useAliceState } from './hooks/useAliceState.js';
 import { useTensorStream } from './hooks/useTensorStream.js';
 import { useCameraStream } from './hooks/useCameraStream.js';
 
-function getRoute() {
-  return window.location.hash.replace('#', '') || '/';
-}
 
-const MODE_IDS = ['idle', 'auto_sort', 'auto_tetris', 'puppeteer', 'demo', 'performance', 'calibrate'];
+/* ═══════════════════════════════════════════════════════════
+   HERO — The ALICE glassmorphic text + zoom-through-A
+   ═══════════════════════════════════════════════════════════ */
 
-const SHORTCUTS = [
-  { key: '1-7', description: 'Switch mode (Idle, Sort, Tetris, Puppet, Demo, Perform, Cal)' },
-  { key: 'R', description: 'Toggle recording' },
-  { key: 'Esc', description: 'Switch to Idle' },
-  { key: '?', description: 'Toggle this help overlay' },
-];
+function Hero({ onEnter }) {
+  const [exiting, setExiting] = useState(false);
 
-function ShortcutsOverlay({ onClose }) {
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 9000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-panel-solid)',
-          border: '1px solid var(--glass-border)',
-          borderRadius: 10, padding: '20px 28px',
-          fontFamily: 'var(--font-mono)', minWidth: 320,
-          boxShadow: 'var(--glass-shadow)',
-        }}
-      >
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 14 }}>
-          Keyboard Shortcuts
-        </div>
-        {SHORTCUTS.map((s) => (
-          <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            <span style={{
-              fontSize: 11, color: 'var(--text-primary)',
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 4, padding: '2px 8px', fontWeight: 600,
-            }}>{s.key}</span>
-            <span style={{ fontSize: 10, color: 'var(--text-secondary)', marginLeft: 16 }}>{s.description}</span>
-          </div>
-        ))}
-        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 12, textAlign: 'center' }}>
-          Press <strong>?</strong> or <strong>Esc</strong> to close
-        </div>
-      </div>
-    </div>
-  );
-}
+  const handleClick = () => {
+    setExiting(true);
+    setTimeout(onEnter, 1200);
+  };
 
-function Dashboard() {
-  const { state, connected, sendCommand, updateState } = useAliceState();
-  const { activations } = useTensorStream();
-  const { frameRef, cameraConnected } = useCameraStream();
-  const { addToast } = useToast();
-  const [showShortcuts, setShowShortcuts] = useState(false);
-  const prevConnectedRef = useRef(connected);
-  const prevModeRef = useRef(state.mode);
-  const prevRecordingRef = useRef(state.recording);
-
-  const armAngles = state.arm_position || [90, 90, 90, 90, 90];
-  const gripperOpen = !(state.gripper_position > 0.5);
-  const mood = state.personality_mood ?? 0.5;
-  const isPerformance = state.mode === 'performance';
-  const demoAct = state.demo_act || 0;
-
-  // Toast on mode switch
   useEffect(() => {
-    if (prevModeRef.current !== undefined && state.mode !== prevModeRef.current) {
-      addToast(`Mode: ${state.mode || 'idle'}`, 'info');
-    }
-    prevModeRef.current = state.mode;
-  }, [state.mode, addToast]);
-
-  // Toast on recording toggle
-  useEffect(() => {
-    if (prevRecordingRef.current !== undefined && state.recording !== prevRecordingRef.current) {
-      addToast(state.recording ? 'Recording started' : 'Recording stopped', state.recording ? 'error' : 'success');
-    }
-    prevRecordingRef.current = state.recording;
-  }, [state.recording, addToast]);
-
-  // Toast on WS reconnect
-  useEffect(() => {
-    if (prevConnectedRef.current === false && connected === true) {
-      addToast('Reconnected to ALICE', 'success');
-    }
-    prevConnectedRef.current = connected;
-  }, [connected, addToast]);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-
-      if (e.key === '?') { e.preventDefault(); setShowShortcuts((v) => !v); return; }
-
-      if (e.key === 'Escape') {
-        if (showShortcuts) { setShowShortcuts(false); }
-        else { updateState({ mode: 'idle' }); sendCommand('switch_mode', { mode: 'idle' }); }
-        return;
-      }
-
-      if (e.key === 'r' || e.key === 'R') {
-        sendCommand(state.recording ? 'stop_recording' : 'start_recording');
-        return;
-      }
-
-      const num = parseInt(e.key, 10);
-      if (num >= 1 && num <= MODE_IDS.length) {
-        const modeId = MODE_IDS[num - 1];
-        updateState({ mode: modeId });
-        sendCommand('switch_mode', { mode: modeId });
-      }
+    const handler = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') handleClick();
     };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showShortcuts, sendCommand, updateState, state.recording]);
-
-  const handleSnapshot = useCallback(() => {
-    sendCommand('snapshot');
-    addToast('Snapshot captured', 'success');
-  }, [sendCommand, addToast]);
-
-  const handlePresetSelect = useCallback((preset) => {
-    sendCommand('vote_preset', { preset });
-    addToast(`Voted: ${preset}`, 'info');
-  }, [sendCommand, addToast]);
-
-  return (
-    <div className="dashboard">
-      {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />}
-
-      {/* Connection warning banner */}
-      {!connected && (
-        <div style={{
-          gridColumn: '1 / -1',
-          background: 'rgba(127, 29, 29, 0.6)', backdropFilter: 'blur(10px)',
-          color: '#fca5a5', padding: '6px 16px', fontSize: 11,
-          fontFamily: 'var(--font-mono)', textAlign: 'center',
-          borderRadius: 6, border: '1px solid rgba(153, 27, 27, 0.5)',
-        }}>
-          Disconnected from ALICE — data may be stale. Reconnecting...
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="dashboard-header">
-        <h1>A.L.I.C.E.</h1>
-        <div className="header-controls">
-          {/* Mood bar in header */}
-          <div className="mood-bar">
-            <div className="mood-bar-fill" style={{ width: `${mood * 100}%` }} />
-          </div>
-          <select
-            className="mode-select"
-            value={state.mode || 'idle'}
-            onChange={(e) => {
-              const mode = e.target.value;
-              updateState({ mode });
-              sendCommand('switch_mode', { mode });
-            }}
-          >
-            <option value="idle">Idle</option>
-            <option value="auto_sort">Auto Sort</option>
-            <option value="auto_tetris">Auto Tetris</option>
-            <option value="puppeteer">Puppeteer</option>
-            <option value="demo">Demo</option>
-            <option value="performance">Performance</option>
-            <option value="calibrate">Calibrate</option>
-          </select>
-          <div className={`status-dot ${connected ? '' : 'disconnected'}`} />
-        </div>
-      </div>
-
-      {/* Performance Timeline */}
-      <PerformanceTimeline currentAct={demoAct} visible={isPerformance && demoAct > 0} />
-
-      {/* Camera + Overlays */}
-      <ErrorBoundary>
-        <div className="panel panel-camera">
-          <div className="panel-header">
-            <h2>Camera Feed</h2>
-            <div className="indicator" style={{ background: cameraConnected ? 'var(--success)' : 'var(--danger)' }} />
-          </div>
-          <div className="panel-body" style={{ padding: 0, position: 'relative' }}>
-            <CameraPanel frameRef={frameRef} />
-            <BlockOverlay blocks={state.blocks || []} />
-            <ArmOverlay angles={armAngles} gripperOpen={gripperOpen} />
-          </div>
-        </div>
-      </ErrorBoundary>
-
-      {/* Brain Viewport */}
-      <ErrorBoundary>
-        <div className="panel panel-brain">
-          <div className="panel-header">
-            <h2>Glass Brain</h2>
-            <div className="indicator" style={{ background: activations.length > 0 ? 'var(--success)' : 'var(--text-dim)' }} />
-          </div>
-          <div className="panel-body" style={{ padding: 0 }}>
-            <BrainViewport activations={activations} />
-          </div>
-        </div>
-      </ErrorBoundary>
-
-      {/* CNN Activations */}
-      <ErrorBoundary>
-        <div className="panel panel-activations">
-          <div className="panel-header">
-            <h2>Neural Activations</h2>
-            <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{activations.length} layers</span>
-          </div>
-          <div className="panel-body">
-            <ActivationPanel activations={activations} />
-          </div>
-        </div>
-      </ErrorBoundary>
-
-      {/* Simulated Arm */}
-      <ErrorBoundary>
-        <div className="panel panel-arm">
-          <div className="panel-header">
-            <h2>Arm Model</h2>
-            <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{armAngles.length} axes</span>
-          </div>
-          <div className="panel-body" style={{ padding: 0 }}>
-            <SimulatedArm angles={armAngles} gripperOpen={gripperOpen} />
-          </div>
-        </div>
-      </ErrorBoundary>
-
-      {/* Sidebar */}
-      <div className="panel-sidebar">
-        {/* Personality */}
-        <div className="panel">
-          <div className="panel-header"><h2>Personality</h2></div>
-          <div className="panel-body">
-            <PersonalityPanel state={state} />
-          </div>
-        </div>
-
-        {/* Object Memory */}
-        <div className="panel" style={{ flex: 1 }}>
-          <div className="panel-header">
-            <h2>Object Memory</h2>
-            <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>
-              {(state.object_memory || []).length} objects
-            </span>
-          </div>
-          <div className="panel-body">
-            <ObjectMemoryPanel objects={state.object_memory || []} />
-          </div>
-        </div>
-
-        {/* Desk Presets (shown during performance/idle) */}
-        <div className="panel">
-          <div className="panel-header"><h2>Desk Presets</h2></div>
-          <div className="panel-body">
-            <DeskPresetSelector
-              activePreset={state.active_preset}
-              presetVotes={state.preset_votes}
-              onSelectPreset={handlePresetSelect}
-            />
-          </div>
-        </div>
-
-        {/* System State */}
-        <div className="panel">
-          <div className="panel-header"><h2>System</h2></div>
-          <div className="panel-body">
-            <SystemState state={state} connected={connected} cameraConnected={cameraConnected} />
-          </div>
-        </div>
-
-        {/* Context-sensitive: Sort or Tetris */}
-        <SortDashboard state={state} />
-        <TetrisDashboard state={state} />
-
-        {/* Mode Controls */}
-        <div className="panel" style={{ flex: 0 }}>
-          <div className="panel-header"><h2>Mode Controls</h2></div>
-          <div className="panel-body">
-            <ModeControls currentMode={state.mode} sendCommand={sendCommand} updateState={updateState} />
-          </div>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="dashboard-footer">
-        <RecordingControls sendCommand={sendCommand} recording={state.recording || false} />
-      </div>
-    </div>
-  );
-}
-
-export default function App() {
-  const [route, setRoute] = useState(getRoute());
-
-  useEffect(() => {
-    const onHash = () => setRoute(getRoute());
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  if (route === '/audience') {
-    return <Audience />;
-  }
+  return (
+    <div className={`hero ${exiting ? 'exiting' : ''}`} onClick={handleClick}>
+      <div className="hero-title">ALICE</div>
+      <div className="hero-subtitle">
+        The first thing on your desk that knows what's on your desk.
+      </div>
+      <div className="hero-cta">
+        <span>Click anywhere to enter</span>
+      </div>
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   SIDEBAR PANELS
+   ═══════════════════════════════════════════════════════════ */
+
+const EMOTIONS = ['content', 'curious', 'annoyed', 'focused', 'reluctant', 'satisfied', 'startled', 'playful'];
+
+function PersonalityPanel({ state }) {
+  const emotion = state.personality_emotion || 'content';
+  const mood = Math.round((state.personality_mood || 0.5) * 100);
 
   return (
-    <AliceSocketProvider>
-      <ToastProvider>
-        <Dashboard />
-      </ToastProvider>
-    </AliceSocketProvider>
+    <div className="panel">
+      <div className="panel-header">
+        <div className="panel-title">Personality</div>
+        <div className="panel-accent">{emotion}</div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {EMOTIONS.map((e) => (
+          <div key={e} className={`emotion-chip ${emotion === e ? 'active' : ''}`}>
+            {e}
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>MOOD</span>
+          <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{mood}%</span>
+        </div>
+        <div className="mood-track">
+          <div className="mood-fill" style={{ width: `${mood}%` }} />
+        </div>
+      </div>
+      {state.personality_is_in_flow && (
+        <div style={{ marginTop: 10, fontSize: 10, color: 'var(--cyan)', fontWeight: 600, letterSpacing: '0.08em' }}>
+          IN FLOW STATE
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function ObjectsPanel({ state }) {
+  const objects = state.object_memory || [];
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <div className="panel-title">Object Memory</div>
+        <div className="panel-accent">{objects.length}</div>
+      </div>
+      {objects.length === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>No objects tracked yet</div>
+      ) : (
+        objects.slice(0, 8).map((obj, i) => (
+          <div key={obj.object_id || i} className="obj-row">
+            <div>
+              <span className="obj-name">{obj.label || obj.object_id}</span>
+              {obj.session_count <= 1 && <span className="badge badge-new" style={{ marginLeft: 6 }}>New</span>}
+              {obj.has_moved && <span className="badge badge-moved" style={{ marginLeft: 6 }}>Moved</span>}
+            </div>
+            <span className="obj-detail">
+              {obj.confidence ? `${Math.round(obj.confidence * 100)}%` : ''}
+            </span>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+
+function LivingPanel({ state }) {
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <div className="panel-title">Living Behaviors</div>
+      </div>
+      <div className="living-grid">
+        <div className="living-card">
+          <div className="living-num">{(state.curiosity_total || 0).toFixed(1)}</div>
+          <div className="living-label">Curiosity</div>
+        </div>
+        <div className="living-card">
+          <div className="living-num">{state.active_habits || 0}</div>
+          <div className="living-label">Habits</div>
+        </div>
+        <div className="living-card">
+          <div className="living-num" style={{ fontSize: 13 }}>{state.gaze_target || '—'}</div>
+          <div className="living-label">Watching</div>
+        </div>
+        <div className="living-card">
+          <div className="living-num" style={{ fontSize: 13 }}>{state.current_posture || '—'}</div>
+          <div className="living-label">Posture</div>
+        </div>
+      </div>
+      {state.curiosity_most_curious && (
+        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-secondary)' }}>
+          Most curious about: <span style={{ color: 'var(--cyan)' }}>{state.curiosity_most_curious}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function ModifiersPanel({ state }) {
+  const mods = [
+    { key: 'spd', label: 'Speed', val: state.llm_mod_spd || 1.0 },
+    { key: 'pos', label: 'Posture', val: state.llm_mod_pos || 1.0 },
+  ];
+  const source = state.llm_mod_source || 'default';
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <div className="panel-title">LLM Modifiers</div>
+        <div className="panel-accent">{source === 'llm' ? 'Active' : 'Default'}</div>
+      </div>
+      {mods.map((m) => (
+        <div key={m.key} className="mod-row">
+          <span className="mod-key">{m.label}</span>
+          <div className="mod-track">
+            <div className="mod-bar" style={{ width: `${Math.min(100, (m.val / 2) * 100)}%` }} />
+          </div>
+          <span className="mod-val">{m.val.toFixed(1)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+function SystemPanel({ state, connected }) {
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <div className="panel-title">System</div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <SysRow label="Connection" value={connected ? 'Online' : 'Offline'} color={connected ? 'var(--green)' : 'var(--red)'} />
+        <SysRow label="Arm" value={state.arm_state || 'unknown'} />
+        <SysRow label="Presence" value={state.presence_detected ? `${state.presence_count} face${state.presence_count !== 1 ? 's' : ''}` : 'None'} />
+        {state.tetris_score > 0 && <SysRow label="Tetris" value={`${state.tetris_score} pts`} />}
+      </div>
+    </div>
+  );
+}
+
+function SysRow({ label, value, color }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{label}</span>
+      <span style={{ fontSize: 11, fontWeight: 500, color: color || 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{value}</span>
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   PERFORMANCE TIMELINE
+   ═══════════════════════════════════════════════════════════ */
+
+const ACTS = [
+  "She's Already Here",
+  "She Knows This Desk",
+  "She Helps",
+  "She Has Opinions",
+  "Engagement",
+  "Identity",
+];
+
+function Timeline({ currentAct }) {
+  return (
+    <div className="panel" style={{ padding: '12px 20px' }}>
+      <div className="timeline">
+        {ACTS.map((name, i) => (
+          <div key={i} className="tl-act">
+            {i < ACTS.length - 1 && <div className="tl-line" />}
+            <div className={`tl-dot ${i + 1 === currentAct ? 'active' : i + 1 < currentAct ? 'done' : ''}`} />
+            <div className="tl-name">{name}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   DASHBOARD — Main layout
+   ═══════════════════════════════════════════════════════════ */
+
+function Dashboard({ entering }) {
+  const { state, connected } = useAliceState();
+  const activations = useTensorStream();
+  const { frameRef, cameraConnected } = useCameraStream();
+
+  const mode = state.mode || 'idle';
+  const isPerformance = mode === 'performance';
+
+  return (
+    <div className={`dashboard ${entering ? 'entering' : ''}`}>
+      {/* Header */}
+      <header className="dash-header">
+        <div className="dash-logo">
+          <span>A</span>LICE
+        </div>
+        <div className="dash-status">
+          <div className="status-pill">
+            <div className={`status-dot ${connected ? '' : 'off'}`} />
+            {connected ? 'Connected' : 'Offline'}
+          </div>
+          <div className="mode-chip">{mode}</div>
+        </div>
+      </header>
+
+      {/* Left column — Camera + Arm */}
+      <div className="dash-col">
+        <div className="panel panel-fill" style={{ padding: 0 }}>
+          <ErrorBoundary>
+            <div className="camera-wrap">
+              <CameraPanel frameRef={frameRef} />
+            </div>
+          </ErrorBoundary>
+        </div>
+        <div className="panel panel-half" style={{ padding: 0 }}>
+          <ErrorBoundary>
+            <div className="viewport">
+              <SimulatedArm
+                angles={state.arm_position || [0, 0, 0, 0, 0]}
+                gripperOpen={state.gripper_position < 0.5}
+              />
+              <div className="viewport-tag">Arm Model</div>
+            </div>
+          </ErrorBoundary>
+        </div>
+      </div>
+
+      {/* Center column — Brain + Timeline */}
+      <div className="dash-col">
+        {isPerformance && <Timeline currentAct={state.demo_act || 0} />}
+        <div className="panel panel-fill" style={{ padding: 0 }}>
+          <ErrorBoundary>
+            <div className="viewport">
+              <BrainViewport activations={activations} />
+              <div className="viewport-tag">Neural Activity</div>
+            </div>
+          </ErrorBoundary>
+        </div>
+      </div>
+
+      {/* Sidebar */}
+      <div className="dash-col dash-sidebar">
+        <ErrorBoundary><PersonalityPanel state={state} /></ErrorBoundary>
+        <ErrorBoundary><LivingPanel state={state} /></ErrorBoundary>
+        <ErrorBoundary><ObjectsPanel state={state} /></ErrorBoundary>
+        <ErrorBoundary><ModifiersPanel state={state} /></ErrorBoundary>
+        <ErrorBoundary><SystemPanel state={state} connected={connected} /></ErrorBoundary>
+      </div>
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   APP — Hero → Dashboard transition
+   ═══════════════════════════════════════════════════════════ */
+
+export default function App() {
+  const [view, setView] = useState('hero'); // 'hero' | 'entering' | 'dashboard'
+
+  const handleEnter = useCallback(() => {
+    setView('entering');
+    setTimeout(() => setView('dashboard'), 100);
+  }, []);
+
+  return (
+    <ToastProvider>
+      <AliceSocketProvider>
+        {view === 'hero' && <Hero onEnter={handleEnter} />}
+        {view !== 'hero' && <Dashboard entering={view === 'entering'} />}
+      </AliceSocketProvider>
+    </ToastProvider>
   );
 }
