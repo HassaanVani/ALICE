@@ -347,8 +347,10 @@ class ALICE:
                 # Wire emotion listener → body language
                 self.personality.on_emotion_change(self.body_language.on_emotion_change)
 
-                # Wire voice sentiment → body language
+                # Wire voice sentiment + listening personality → body language + sound
                 self.voice_input.set_body_language(self.body_language)
+                self.voice_input.set_sound_effects(self.sound_effects_engine)
+                self.voice_input.set_dynamics(self.dynamics)
 
                 logger.info("Living behaviors initialized")
 

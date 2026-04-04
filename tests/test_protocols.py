@@ -22,6 +22,7 @@ from logic.protocols import (
     FistBumpProtocol,
     WakeScanProtocol,
     TeachProtocol,
+    IgnoreProtocol,
     build_registry,
     build_selector,
 )
@@ -125,7 +126,7 @@ class TestBuildRegistry:
         expected = [
             "fetch", "hand_over", "place_beside", "throw_away",
             "nudge", "organize", "guard_spill", "fist_bump",
-            "scan_desk", "teach",
+            "scan_desk", "teach", "ignore",
         ]
         for name in expected:
             assert registry.get(name) is not None, f"Missing protocol: {name}"
@@ -133,7 +134,7 @@ class TestBuildRegistry:
     def test_build_registry_count(self):
         interaction = mock_interaction()
         registry = build_registry(interaction)
-        assert len(registry.names) == 10
+        assert len(registry.names) == 11
 
 
 # ── Protocol specs ───────────────────────────────────────────────
@@ -369,6 +370,21 @@ class TestFistBumpProtocol:
 
 
 # ── ProtocolContext ──────────────────────────────────────────────
+
+class TestIgnoreProtocol:
+    def test_ignore_spec(self):
+        spec = IgnoreProtocol().spec()
+        assert spec.name == "ignore"
+        assert len(spec.params) == 0
+
+    @pytest.mark.asyncio
+    async def test_ignore_execute(self):
+        proto = IgnoreProtocol()
+        ctx = mock_ctx()
+        result = await proto.execute({}, ctx)
+        assert result.success is True
+        assert result.action == "ignore"
+
 
 class TestProtocolContext:
     def test_context_construction(self):

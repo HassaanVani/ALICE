@@ -102,7 +102,9 @@ class ProtocolRegistry:
     def tool_prompt(self, visible_objects: Optional[List[str]] = None) -> str:
         """Generate a compact LLM prompt listing all user-facing protocols."""
         lines = [
-            'Pick ONE tool. Output ONLY JSON: {"tool":"<name>","params":{...}}',
+            'Pick ONE tool from the list below. Output ONLY a JSON object.',
+            'Format: {"tool":"<tool_name>","params":{...}}',
+            'The "tool" value MUST be one of the tool names listed below. Do not use object names as tool names.',
         ]
         if visible_objects:
             lines.append(f"Objects visible: {', '.join(visible_objects)}")
@@ -126,6 +128,11 @@ _ACTION_TO_PROTOCOL = {
     "throw_away": "throw_away",
     "nudge": "nudge",
     "organize": "organize",
+    "guard_spill": "guard_spill",
+    "scan_desk": "scan_desk",
+    "fist_bump": "fist_bump",
+    "teach": "teach",
+    "ignore": "ignore",
 }
 
 _TOOL_JSON_RE = re.compile(r'\{(?:[^{}]|\{[^{}]*\})*\}')
@@ -195,7 +202,10 @@ class ProtocolSelector:
     async def _try_llm(self, text: str,
                        visible_objects: Optional[List[str]] = None,
                        ) -> Optional[Tuple[str, dict]]:
-        """Use Ollama to select a protocol via tool-use prompt."""
+        """Use Ollama to select a protocol via tool-use prompt.
+
+        Retries once on garbled output with a corrective nudge.
+        """
         prompt = self._registry.tool_prompt(visible_objects)
         prompt += f'\nUser: "{text}"\n'
 
@@ -208,7 +218,29 @@ class ProtocolSelector:
         if not raw:
             return None
 
-        return self._parse_llm_response(raw)
+        result = self._parse_llm_response(raw)
+        if result is not None:
+            return result
+
+        # Retry once — the model garbled the first response
+        retry_prompt = (
+            prompt
+            + f"Your previous response was invalid: {raw[:80]}\n"
+            + "Remember: the tool name must be one from the list above. "
+            + 'Output ONLY valid JSON: {"tool":"<name>","params":{...}}\n'
+        )
+        try:
+            raw = await self._ollama_generate(retry_prompt)
+        except Exception:
+            return None
+
+        if raw:
+            result = self._parse_llm_response(raw)
+            if result is not None:
+                logger.debug(f"Protocol selector recovered on retry: {result[0]}")
+                return result
+
+        return None
 
     def _parse_llm_response(self, raw: str) -> Optional[Tuple[str, dict]]:
         """Extract {"tool": "...", "params": {...}} from LLM output."""
@@ -492,6 +524,23 @@ class TeachProtocol(Protocol):
             )
 
 
+class IgnoreProtocol(Protocol):
+    """Do nothing — the user said something that doesn't map to an action."""
+
+    def spec(self):
+        return ProtocolSpec(
+            "ignore",
+            "do nothing — user is not requesting an action (greetings, thanks, unclear, off-topic)",
+            {},
+        )
+
+    async def execute(self, params, ctx):
+        return InteractionResult(
+            success=True, action="ignore", object_label="",
+            message="no action needed",
+        )
+
+
 # ── Factory ──────────────────────────────────────────────────────
 
 def build_registry(interaction, kinesthetic=None) -> ProtocolRegistry:
@@ -513,6 +562,7 @@ def build_registry(interaction, kinesthetic=None) -> ProtocolRegistry:
     registry.register(FistBumpProtocol())
     registry.register(WakeScanProtocol())
     registry.register(TeachProtocol())
+    registry.register(IgnoreProtocol())
 
     logger.info(f"Protocol registry: {len(registry.names)} protocols registered")
     return registry

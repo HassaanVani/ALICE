@@ -56,20 +56,69 @@ class ParsedCommand:
 # --- Command parser (regex fast path + LLM fallback) ---
 
 # Patterns checked in order. First match wins.
+# Structured commands hit these at 0ms. Anything that falls through goes to the LLM.
 _PATTERNS = [
-    # hand_over: "pass me the X", "give me the X", "hand me X"
+    # ── fist_bump (MUST be before hand_over to catch "give me a fist bump") ──
+    (re.compile(r"(?:fist\s+bump|bump\s+(?:it|fists?)|pound\s+it|dap\s+me|high\s+five|knucks|bump\s+me|give\s+me\s+a\s+(?:fist\s+bump|high\s+five))", re.I), "fist_bump"),
+    (re.compile(r"let'?s\s+bump\s+fists?", re.I), "fist_bump"),
+
+    # ── hand_over: user wants ALICE to hold an object out for them ──
+    # "pass me X", "give me X", "hand me X", "hold up X for me", "lift X up for me"
     (re.compile(r"(?:pass|give|hand)\s+(?:me\s+)?(?:the\s+|my\s+)?(.+)", re.I), "hand_over"),
-    # move_near: "move X near Y", "put X next to Y", "place X by Y"
+    (re.compile(r"(?:hold|lift)\s+(?:up\s+)?(?:the\s+|my\s+)?(.+?)(?:\s+(?:up\s+)?for\s+me)", re.I), "hand_over"),
+    (re.compile(r"pick\s+up\s+(?:the\s+|my\s+)?(.+?)\s+and\s+(?:give|hand|pass)", re.I), "hand_over"),
+    (re.compile(r"(?:gimme|lemme\s+have)\s+(?:the\s+|my\s+)?(.+)", re.I), "hand_over"),
+
+    # ── move_near: pick up one object, put it next to another ──
     # Source/target limited to 1-4 words each to prevent over-capture on long sentences
-    (re.compile(r"(?:move|put|place)\s+(?:the\s+|my\s+)?(\w+(?:\s+\w+){0,3}?)\s+(?:near|next to|beside|by|close to)\s+(?:the\s+|my\s+)?(\w+(?:\s+\w+){0,3})$", re.I), "move_near"),
-    # throw_away: "throw away X", "toss X", "trash X", "discard X"
-    (re.compile(r"(?:throw\s+away|toss|trash|discard|dump|get\s+rid\s+of)\s+(?:the\s+|my\s+)?(.+)", re.I), "throw_away"),
-    # fetch: "get X", "grab X", "bring me X", "fetch X"
-    (re.compile(r"(?:get|grab|bring|fetch)\s+(?:me\s+)?(?:the\s+|my\s+)?(.+)", re.I), "fetch"),
-    # nudge: "push X left/right", "scoot X over"
-    (re.compile(r"(?:nudge|push|slide|scoot)\s+(?:the\s+|my\s+)?(.+?)\s+(?:over\s+)?(?:(?:a\s+)?(?:bit|little)\s+)?(?:to\s+the\s+)?(left|right|forward|back)", re.I), "nudge"),
-    # organize: "clean the desk", "tidy up", "organize"
-    (re.compile(r"(?:clean|tidy|organize|straighten)(?:\s+(?:the\s+)?(?:desk|table|up))?", re.I), "organize"),
+    (re.compile(r"(?:move|put|place)\s+(?:the\s+|my\s+)?(\w+(?:\s+\w+){0,3}?)\s+(?:near|next to|beside|by|close to|closer to)\s+(?:the\s+|my\s+)?(\w+(?:\s+\w+){0,3})$", re.I), "move_near"),
+
+    # ── throw_away: discard, trash, bin ──
+    (re.compile(r"(?:throw\s+away|throw\s+(?:this|that|it)\s+out|toss|trash|discard|dump|get\s+rid\s+of|chuck|bin)\s*(?:the\s+|my\s+|that\s+|this\s+)?(.+)?", re.I), "throw_away"),
+    (re.compile(r"(?:this|that)\s+is\s+trash", re.I), "throw_away"),
+
+    # ── fetch: pick up and bring an object ──
+    # Negative lookahead prevents matching "get to work", "get going", "get this place cleaned", etc.
+    (re.compile(r"(?:get|grab|bring|fetch|pick\s+up)\s+(?:me\s+)?(?:the\s+|my\s+)?(?!to\s|going|started|ready|back to|this\s+place)(.+)", re.I), "fetch"),
+    (re.compile(r"i\s+need\s+(?:the\s+|my\s+|a\s+)?(.+)", re.I), "fetch"),
+
+    # ── nudge: push without picking up ──
+    (re.compile(r"(?:nudge|push|slide|scoot|shove)\s+(?:the\s+|my\s+)?(.+?)\s+(?:over\s+)?(?:(?:a\s+)?(?:bit|little)\s+)?(?:to\s+the\s+)?(left|right|forward|back)", re.I), "nudge"),
+    (re.compile(r"(?:i\s+don'?t\s+want)\s+(?:the\s+|my\s+)?(.+?)\s+(?:there|here)", re.I), "nudge"),
+
+    # ── organize: tidy, clean, set up for activity ──
+    (re.compile(r"(?:clean|tidy|organize|straighten|clear)(?:\s+(?:the\s+)?(?:desk|table|up|some\s+space))?", re.I), "organize"),
+    (re.compile(r"(?:set\s+up|ready|prepare|get\s+ready)\s+(?:the\s+desk\s+)?(?:for\s+|my\s+)?(?:a\s+)?(study(?:ing)?|draw(?:ing)?|work(?:ing)?|clean)", re.I), "organize"),
+    (re.compile(r"(?:everything|desk)\s+(?:is|looks)\s+(?:a\s+)?(?:mess|cluttered|messy|chaotic)", re.I), "organize"),
+    (re.compile(r"(?:let'?s|lets)\s+get\s+to\s+work", re.I), "organize"),
+    (re.compile(r"ready\s+for\s+(?:a\s+)?(?:study|work|drawing)\s+session", re.I), "organize"),
+
+    # ── guard_spill: protect electronics from drinks ──
+    (re.compile(r"(?:cup|coffee|tea|drink|mug|beverage).{0,40}(?:too\s+close|spill|away\s+from|near\s+(?:the\s+)?(?:laptop|computer|keyboard|macbook|electronics))", re.I), "guard_spill"),
+    (re.compile(r"(?:laptop|computer|keyboard|macbook).{0,30}(?:spill|too\s+close)", re.I), "guard_spill"),
+    (re.compile(r"careful\s+with\s+(?:the\s+|that\s+)?(?:drink|cup|coffee|tea|mug)", re.I), "guard_spill"),
+    (re.compile(r"(?:might|going\s+to|gonna)\s+spill", re.I), "guard_spill"),
+
+    # ── scan_desk: look around, check what's there ──
+    (re.compile(r"(?:what(?:'s|\s+is|\s+do\s+you\s+see))\s+(?:on|around)\s+(?:the\s+|my\s+)?(?:desk|table)", re.I), "scan_desk"),
+    (re.compile(r"(?:look|check|scan)\s+(?:around|what'?s?\s+(?:here|there|around))", re.I), "scan_desk"),
+    (re.compile(r"(?:can\s+you\s+see|do\s+you\s+see|is)\s+(?:the\s+|my\s+)?(\w+)\s+(?:still\s+)?(?:there|here|anywhere|on the desk)", re.I), "scan_desk"),
+    (re.compile(r"(?:where\s+(?:is|are)\s+(?:the\s+|my\s+)?)", re.I), "scan_desk"),
+    (re.compile(r"(?:can'?t|cannot)\s+find", re.I), "scan_desk"),
+
+    # ── scan_desk: "have you seen X", "where did i put X", "can you find X" ──
+    (re.compile(r"(?:have\s+you\s+seen|where\s+did\s+i\s+put|do\s+you\s+know\s+where)\s+(?:the\s+|my\s+)?(.+)", re.I), "scan_desk"),
+    (re.compile(r"can\s+you\s+find\s+(?:the\s+|my\s+)?(.+)", re.I), "scan_desk"),
+
+    # ── teach: show ALICE where something goes ──
+    (re.compile(r"(?:teach|train)\s+(?:alice\s+)?(?:where|how|about)\s+(?:the\s+|my\s+|this\s+)?(.+?)(?:\s+(?:goes|belongs|should\s+(?:go|be)))?$", re.I), "teach"),
+    (re.compile(r"(?:show)\s+(?:alice|you)\s+where\s+(?:the\s+|my\s+|this\s+)?(.+?)(?:\s+(?:goes|belongs|should\s+(?:go|be)))?$", re.I), "teach"),
+    (re.compile(r"(?:learn)\s+where\s+(?:the\s+|my\s+|this\s+)?(.+?)(?:\s+(?:goes|belongs|should\s+(?:go|be)))?$", re.I), "teach"),
+    (re.compile(r"(?:remember|memorize)\s+(?:this\s+(?:spot|place|position)\s+(?:for\s+)?|where\s+)(?:the\s+|my\s+)?(.+)", re.I), "teach"),
+    (re.compile(r"this\s+is\s+where\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:goes|belongs|live[sd]?|should\s+(?:go|be)))\s*$", re.I), "teach"),
+
+    # ── ignore: greetings, social, non-commands ──
+    (re.compile(r"^(?:hey|hey\s+alice|hi|hello|yo|sup|thanks|thank\s+you(?:\s+alice)?|never\s+mind|nah|nope|okay|ok|ok\s+cool|sure|cool|bye|good\s+(?:morning|night|evening)|what'?s?\s+up)\.?$", re.I), "ignore"),
 ]
 
 
@@ -86,6 +135,9 @@ class CommandParser:
                 continue
 
             groups = m.groups()
+
+            # Filter out None groups (optional captures that didn't match)
+            groups = [g for g in groups if g is not None]
 
             if action == "move_near" and len(groups) >= 2:
                 return ParsedCommand(
@@ -108,7 +160,7 @@ class CommandParser:
                     raw_text=text,
                 )
             else:
-                # Pattern matched but no capture groups (e.g. "organize")
+                # Pattern matched but no capture groups (e.g. "organize", "ignore")
                 return ParsedCommand(action=action, raw_text=text)
 
         return ParsedCommand(action="unknown", raw_text=text, confidence=0.0)
@@ -405,6 +457,10 @@ class VoiceInputService:
         self._selector = None
         self._protocol_ctx_factory = None
 
+        # Listening personality (optional — body language + sound while processing)
+        self._sound_effects = None
+        self._dynamics = None
+
     def set_interaction(self, interaction) -> None:
         self._interaction = interaction
 
@@ -439,6 +495,14 @@ class VoiceInputService:
     def set_body_language(self, bl) -> None:
         """Attach body language system for voice sentiment → posture reactions."""
         self._body_language = bl
+
+    def set_sound_effects(self, sfx) -> None:
+        """Attach sound effects for listening personality (chirps while processing)."""
+        self._sound_effects = sfx
+
+    def set_dynamics(self, dynamics) -> None:
+        """Attach movement dynamics for attentive orientation while listening."""
+        self._dynamics = dynamics
 
     async def start(self) -> None:
         """Start the voice input service."""
@@ -528,6 +592,10 @@ class VoiceInputService:
             if not text:
                 return
 
+        # ── Listening personality: ALICE heard you ──
+        # She perks up and chirps — she's paying attention now
+        await self._on_listening_start()
+
         # Update state
         if self._state_manager:
             self._state_manager._state.voice_last_command = text
@@ -536,6 +604,9 @@ class VoiceInputService:
         cmd = self._parser.parse(text)
 
         if cmd.action == "unknown":
+            # ── Listening personality: ALICE is thinking ──
+            await self._on_thinking()
+
             # Try protocol selector (LLM-backed) before giving up
             if self._selector is not None and self._protocol_ctx_factory is not None:
                 visible = self._get_visible_objects()
@@ -560,7 +631,11 @@ class VoiceInputService:
 
             if cmd.action == "unknown":
                 logger.info(f"Could not parse voice command: \"{text}\"")
+                await self._on_confused()
                 return
+
+        # ── Listening personality: ALICE understood ──
+        await self._on_understood()
 
         logger.info(f"Voice command: {cmd.action}({cmd.source_label}" +
                      (f", {cmd.target_label}" if cmd.target_label else "") + ")")
@@ -660,6 +735,62 @@ class VoiceInputService:
                 object_label='desk', message='',
             )
         return None
+
+    # ── Listening personality beats ──────────────────────────────
+
+    async def _on_listening_start(self) -> None:
+        """ALICE heard the wake word — she perks up and chirps.
+
+        The arm lifts slightly and the wrist twitches: "I'm here."
+        """
+        if self._body_language is not None:
+            self._body_language.on_event("new_person")  # triggers "attentive" posture
+
+        if self._sound_effects is not None:
+            try:
+                from audio.sound_effects import SoundCategory
+                asyncio.create_task(self._sound_effects.play(SoundCategory.ACKNOWLEDGE))
+            except Exception:
+                pass
+
+    async def _on_thinking(self) -> None:
+        """Regex didn't match — ALICE is thinking harder (LLM fallback).
+
+        Slow wrist wobble: she's processing. Lean in: she's trying to understand.
+        """
+        if self._body_language is not None:
+            self._body_language._trigger("lean_in")
+
+        if self._sound_effects is not None:
+            try:
+                from audio.sound_effects import SoundCategory
+                asyncio.create_task(self._sound_effects.play(SoundCategory.THINKING))
+            except Exception:
+                pass
+
+    async def _on_understood(self) -> None:
+        """ALICE understood the command — quick bounce before executing.
+
+        A subtle "got it" beat: shoulder lifts, then she's off.
+        """
+        if self._body_language is not None:
+            self._body_language._trigger("bounce")
+
+        if self._sound_effects is not None:
+            try:
+                from audio.sound_effects import SoundCategory
+                asyncio.create_task(self._sound_effects.play(SoundCategory.SATISFIED))
+            except Exception:
+                pass
+
+    async def _on_confused(self) -> None:
+        """ALICE couldn't parse the command — slight droop, no action.
+
+        She doesn't announce confusion. She just... doesn't do anything.
+        The body language says it: a small droop, then back to neutral.
+        """
+        if self._body_language is not None:
+            self._body_language._trigger("droop")
 
     def _get_visible_objects(self) -> List[str]:
         """Get labels of currently visible objects for LLM context."""
