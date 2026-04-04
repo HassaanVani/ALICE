@@ -51,7 +51,6 @@ class WebSocketConfig:
     tensor_port: int = 8765
     puppet_host: str = "localhost"
     puppet_port: int = 8766
-    audience_port: int = 8767
 
 
 @dataclass
@@ -88,7 +87,6 @@ class PersonalityConfig:
     override_comment_threshold: int = 3
     speed_self_initiated: float = 1.3
     speed_user_requested: float = 1.0
-    speed_crowd_requested: float = 0.9
     speed_override: float = 0.6
     idle_micro_motion_delay: float = 3.0
     idle_tetris_delay: float = 30.0
@@ -203,7 +201,6 @@ def _apply_env_overrides(data: dict) -> dict:
         "ALICE_IMU_PORT": ("hardware", "imu", "port"),
         "ALICE_TENSOR_PORT": ("websocket", "tensor_port"),
         "ALICE_PUPPET_PORT": ("websocket", "puppet_port"),
-        "ALICE_AUDIENCE_PORT": ("websocket", "audience_port"),
     }
 
     # Env vars that should stay as raw strings (e.g. serial port paths)
@@ -282,7 +279,6 @@ def _dict_to_config(data: dict) -> AliceConfig:
         tensor_port=ws_data.get("tensor_port", 8765),
         puppet_host=ws_data.get("puppet_host", "localhost"),
         puppet_port=ws_data.get("puppet_port", 8766),
-        audience_port=ws_data.get("audience_port", 8767),
     )
 
     narr_data = data.get("narration", {})
@@ -328,7 +324,7 @@ def _dict_to_config(data: dict) -> AliceConfig:
         override_comment_threshold=p_data.get("override_comment_threshold", 3),
         speed_self_initiated=p_data.get("speed_self_initiated", 1.3),
         speed_user_requested=p_data.get("speed_user_requested", 1.0),
-        speed_crowd_requested=p_data.get("speed_crowd_requested", 0.9),
+
         speed_override=p_data.get("speed_override", 0.6),
         idle_micro_motion_delay=p_data.get("idle_micro_motion_delay", 3.0),
         idle_tetris_delay=p_data.get("idle_tetris_delay", 30.0),

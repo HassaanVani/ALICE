@@ -70,13 +70,6 @@ def mock_context(*, running_calls=1):
     # Recorder
     ctx.recorder.is_recording = False
 
-    # Audience
-    ctx.audience_server = MagicMock()
-    ctx.audience_server.consume_votes = MagicMock(return_value=None)
-    ctx.audience_server.broadcast_winner = AsyncMock()
-    ctx.audience_server.broadcast_action = AsyncMock()
-    ctx.audience_server.broadcast_override = AsyncMock()
-
     # Puppet server
     ctx.puppet_server = MagicMock()
 

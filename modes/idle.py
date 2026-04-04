@@ -27,9 +27,13 @@ class IdleRunner(ModeRunner):
         tetris_active = False
         tetris_controller = None
 
-        # Fist bump detector — activated when someone is close
-        from logic.fist_bump import FistBumpInteraction
-        fist_bump = FistBumpInteraction()
+        # Fist bump — use protocol from registry if available, else direct
+        fist_bump_protocol = self.ctx.registry.get("fist_bump") if self.ctx.registry else None
+        if fist_bump_protocol is not None:
+            fist_bump = fist_bump_protocol.inner  # underlying FistBumpInteraction
+        else:
+            from logic.fist_bump import FistBumpInteraction
+            fist_bump = FistBumpInteraction()
 
         # Auto-cleanup state
         last_cleanup_time: float = 0.0
@@ -270,8 +274,9 @@ class IdleRunner(ModeRunner):
 
             await asyncio.sleep(self.ctx.config.timing.idle_loop_s)
 
-        # Clean shutdown
-        fist_bump.shutdown()
+        # Clean shutdown — only if we created the fist bump locally
+        if fist_bump_protocol is None:
+            fist_bump.shutdown()
         if tetris_active and tetris_controller is not None:
             await self._stop_tetris(tetris_controller)
             if self.ctx.personality is not None:

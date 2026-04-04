@@ -93,22 +93,6 @@ Context: The human left the desk. You're alone now.
 Respond with [silence]. You don't comment on this."""
 
 
-def crowd_vote_prompt(task: str, agrees: bool) -> str:
-    """Audience voted on a task for ALICE."""
-    if agrees:
-        return f"""{SYSTEM_PROMPT}
-
-Context: The audience voted for you to {task}. You were going to do that anyway.
-
-Respond in character. Or [silence]."""
-    else:
-        return f"""{SYSTEM_PROMPT}
-
-Context: The audience voted for you to {task}. You disagree.
-
-Respond in character. One to three words. Make it clear you'll comply, reluctantly."""
-
-
 def question_prompt(question: str) -> str:
     """Someone asked ALICE a question about her arrangement."""
     return f"""{SYSTEM_PROMPT}

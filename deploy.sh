@@ -193,10 +193,8 @@ cmd_start() {
   echo -e "${GREEN}${BOLD}  All services running.${NC}"
   echo
   echo -e "  ${DIM}Dashboard:${NC}    ${BOLD}http://localhost:3001${NC}"
-  echo -e "  ${DIM}Audience:${NC}     ${BOLD}http://localhost:3001/#/audience${NC}"
   echo -e "  ${DIM}Tensor WS:${NC}    ${DIM}ws://localhost:8765${NC}"
   echo -e "  ${DIM}Puppet WS:${NC}    ${DIM}ws://localhost:8766${NC}"
-  echo -e "  ${DIM}Audience WS:${NC}  ${DIM}ws://localhost:8767${NC}"
   echo
   echo -e "  ${DIM}Logs:${NC}         ${DIM}$LOG_DIR/${NC}"
   echo -e "  ${DIM}Stop:${NC}         ${BOLD}./deploy.sh stop${NC}"
@@ -302,7 +300,7 @@ cmd_status() {
   echo -e "${DIM}────────────────────────────────${NC}"
 
   # Port check
-  for port_info in "8765:Tensor WS" "8766:Puppet WS" "8767:Audience WS" "3001:Dashboard"; do
+  for port_info in "8765:Tensor WS" "8766:Puppet WS" "3001:Dashboard"; do
     local port="${port_info%%:*}" name="${port_info##*:}"
     if check_port "$port"; then
       echo -e "  ${GREEN}●${NC} :$port  $name"

@@ -60,13 +60,14 @@ _PATTERNS = [
     # hand_over: "pass me the X", "give me the X", "hand me X"
     (re.compile(r"(?:pass|give|hand)\s+(?:me\s+)?(?:the\s+|my\s+)?(.+)", re.I), "hand_over"),
     # move_near: "move X near Y", "put X next to Y", "place X by Y"
-    (re.compile(r"(?:move|put|place)\s+(?:the\s+|my\s+)?(.+?)\s+(?:near|next to|beside|by|close to)\s+(?:the\s+|my\s+)?(.+)", re.I), "move_near"),
+    # Source/target limited to 1-4 words each to prevent over-capture on long sentences
+    (re.compile(r"(?:move|put|place)\s+(?:the\s+|my\s+)?(\w+(?:\s+\w+){0,3}?)\s+(?:near|next to|beside|by|close to)\s+(?:the\s+|my\s+)?(\w+(?:\s+\w+){0,3})$", re.I), "move_near"),
     # throw_away: "throw away X", "toss X", "trash X", "discard X"
     (re.compile(r"(?:throw\s+away|toss|trash|discard|dump|get\s+rid\s+of)\s+(?:the\s+|my\s+)?(.+)", re.I), "throw_away"),
     # fetch: "get X", "grab X", "bring me X", "fetch X"
     (re.compile(r"(?:get|grab|bring|fetch)\s+(?:me\s+)?(?:the\s+|my\s+)?(.+)", re.I), "fetch"),
-    # nudge: "push X left/right"
-    (re.compile(r"(?:nudge|push|slide)\s+(?:the\s+|my\s+)?(.+?)\s+(?:to\s+the\s+)?(left|right|forward|back)", re.I), "nudge"),
+    # nudge: "push X left/right", "scoot X over"
+    (re.compile(r"(?:nudge|push|slide|scoot)\s+(?:the\s+|my\s+)?(.+?)\s+(?:over\s+)?(?:(?:a\s+)?(?:bit|little)\s+)?(?:to\s+the\s+)?(left|right|forward|back)", re.I), "nudge"),
     # organize: "clean the desk", "tidy up", "organize"
     (re.compile(r"(?:clean|tidy|organize|straighten)(?:\s+(?:the\s+)?(?:desk|table|up))?", re.I), "organize"),
 ]
@@ -399,6 +400,11 @@ class VoiceInputService:
         self._interrupt_callback: Optional[Callable] = None
         self._body_language = None
 
+        # Protocol system (optional — falls back to direct _interaction dispatch)
+        self._registry = None
+        self._selector = None
+        self._protocol_ctx_factory = None
+
     def set_interaction(self, interaction) -> None:
         self._interaction = interaction
 
@@ -423,6 +429,12 @@ class VoiceInputService:
     def set_interrupt_callback(self, cb: Callable) -> None:
         """Callback to interrupt current mode (e.g. stop Tetris)."""
         self._interrupt_callback = cb
+
+    def set_protocol_dispatch(self, registry, selector, ctx_factory) -> None:
+        """Wire the protocol registry for structured dispatch."""
+        self._registry = registry
+        self._selector = selector
+        self._protocol_ctx_factory = ctx_factory
 
     def set_body_language(self, bl) -> None:
         """Attach body language system for voice sentiment → posture reactions."""
@@ -523,14 +535,32 @@ class VoiceInputService:
         # Parse command
         cmd = self._parser.parse(text)
 
-        if cmd.action == "unknown" and self._ollama:
-            # Try LLM fallback with visible objects
-            visible = self._get_visible_objects()
-            cmd = await self._parser.parse_with_llm(text, visible, self._ollama)
-
         if cmd.action == "unknown":
-            logger.info(f"Could not parse voice command: \"{text}\"")
-            return
+            # Try protocol selector (LLM-backed) before giving up
+            if self._selector is not None and self._protocol_ctx_factory is not None:
+                visible = self._get_visible_objects()
+                selected = await self._selector.select(text, visible)
+                if selected is not None:
+                    protocol_name, params = selected
+                    protocol = self._registry.get(protocol_name)
+                    if protocol is not None:
+                        logger.info(f"Voice protocol (LLM): {protocol_name}({params})")
+                        ctx = self._protocol_ctx_factory()
+                        result = await protocol.execute(params, ctx)
+                        if self._state_manager and result:
+                            self._state_manager._state.voice_last_result = (
+                                "done" if result.success else getattr(result, 'message', 'failed')
+                            )
+                        return
+
+            # Legacy LLM fallback
+            if self._ollama:
+                visible = self._get_visible_objects()
+                cmd = await self._parser.parse_with_llm(text, visible, self._ollama)
+
+            if cmd.action == "unknown":
+                logger.info(f"Could not parse voice command: \"{text}\"")
+                return
 
         logger.info(f"Voice command: {cmd.action}({cmd.source_label}" +
                      (f", {cmd.target_label}" if cmd.target_label else "") + ")")
@@ -539,11 +569,7 @@ class VoiceInputService:
         await self._dispatch(cmd)
 
     async def _dispatch(self, cmd: ParsedCommand) -> None:
-        """Execute a parsed voice command."""
-        if self._interaction is None:
-            logger.warning("No interaction system — cannot execute voice command")
-            return
-
+        """Execute a parsed voice command via protocol registry (or legacy fallback)."""
         # Notify personality: someone is talking to her
         if self._personality:
             self._personality._last_action_time = time.time()
@@ -558,28 +584,22 @@ class VoiceInputService:
             except Exception:
                 pass
 
-        camera_getter = self._camera_getter
-
         result = None
-        if cmd.action == "hand_over":
-            result = await self._interaction.hand_over(cmd.source_label, camera_getter)
-        elif cmd.action == "fetch":
-            result = await self._interaction.fetch(cmd.source_label, camera_getter)
-        elif cmd.action == "move_near":
-            result = await self._interaction.move_near(
-                cmd.source_label, cmd.target_label, camera_getter,
-            )
-        elif cmd.action == "throw_away":
-            result = await self._interaction.throw_away(cmd.source_label, camera_getter)
-        elif cmd.action == "organize":
-            # Trigger desk organization via the organizer FSM
-            result = type('R', (), {
-                'success': True, 'action': 'organize',
-                'object_label': 'desk', 'message': '',
-            })()
+
+        # Protocol dispatch (preferred path)
+        if self._registry is not None and self._protocol_ctx_factory is not None:
+            result = await self._dispatch_via_protocol(cmd)
+
+        # Legacy fallback — direct ObjectInteraction
+        if result is None and self._interaction is not None:
+            result = await self._dispatch_legacy(cmd)
+
+        if result is None:
+            logger.warning("No dispatch target — cannot execute voice command")
+            return
 
         # Voice response
-        if self._narration and result:
+        if self._narration:
             if result.success:
                 if self._personality and self._personality.should_speak(topic="voice_ack"):
                     pass  # silence — she just does it (personality default)
@@ -588,10 +608,58 @@ class VoiceInputService:
                 await self._narration.speak(msg)
 
         # Update state
-        if self._state_manager and result:
+        if self._state_manager:
             self._state_manager._state.voice_last_result = (
                 "done" if result.success else getattr(result, 'message', 'failed')
             )
+
+    async def _dispatch_via_protocol(self, cmd: ParsedCommand):
+        """Dispatch through the protocol registry."""
+        from logic.protocols import _ACTION_TO_PROTOCOL
+
+        protocol_name = _ACTION_TO_PROTOCOL.get(cmd.action)
+        if protocol_name is None:
+            return None
+
+        protocol = self._registry.get(protocol_name)
+        if protocol is None:
+            return None
+
+        # Build params from parsed command
+        params = {}
+        if protocol_name == "place_beside":
+            params["source"] = cmd.source_label
+            params["target"] = cmd.target_label
+        elif protocol_name == "nudge":
+            params["object"] = cmd.source_label
+            params["direction"] = cmd.target_label
+        elif cmd.source_label:
+            params["object"] = cmd.source_label
+
+        ctx = self._protocol_ctx_factory()
+        return await protocol.execute(params, ctx)
+
+    async def _dispatch_legacy(self, cmd: ParsedCommand):
+        """Legacy fallback — direct ObjectInteraction dispatch."""
+        camera_getter = self._camera_getter
+
+        if cmd.action == "hand_over":
+            return await self._interaction.hand_over(cmd.source_label, camera_getter)
+        elif cmd.action == "fetch":
+            return await self._interaction.fetch(cmd.source_label, camera_getter)
+        elif cmd.action == "move_near":
+            return await self._interaction.move_near(
+                cmd.source_label, cmd.target_label, camera_getter,
+            )
+        elif cmd.action == "throw_away":
+            return await self._interaction.throw_away(cmd.source_label, camera_getter)
+        elif cmd.action == "organize":
+            from logic.object_interaction import InteractionResult
+            return InteractionResult(
+                success=True, action='organize',
+                object_label='desk', message='',
+            )
+        return None
 
     def _get_visible_objects(self) -> List[str]:
         """Get labels of currently visible objects for LLM context."""

@@ -28,7 +28,7 @@ None.
 - [x] **Kalman filter not thread-safe** — Added `threading.Lock` to `BlockTracker`. All predict/correct/prune operations in `update()` are now serialized under the lock. (`vision/tracker.py`)
 - [x] **State manager listeners can crash each other** — Already had per-listener try/except in `_notify()`. Verified and confirmed working. (`state.py`)
 - [x] **Camera threads hold locks during daemon shutdown** — Replaced `daemon=True` with `daemon=False` + `threading.Event` for clean cooperative shutdown. `stop()` sets the event and joins with timeout. (`vision/camera.py`)
-- [x] **Empty except blocks in server.py and audience_server.py** — Added `logger.debug()` logging for `json.JSONDecodeError` in both files. (`server.py`, `audience_server.py`)
+- [x] **Empty except blocks in server.py** — Added `logger.debug()` logging for `json.JSONDecodeError`. (`server.py`)
 - [x] **Calibration data not validated on load** — Added `_validate_point()` that checks pixel coords are within image bounds and arm angles are in [0, 180]. Invalid points are dropped with a warning. (`hardware/calibration.py`)
 - [x] **No connection status UI in dashboard** — Shared WebSocket provider exposes single `connected` state. Added a "Disconnected — data may be stale" banner to the dashboard when connection drops. (`App.jsx`, `AliceSocketProvider.jsx`)
 - [x] **cv2 window not closed in exception path** — Wrapped calibration mode loop in try/finally so `cv2.destroyAllWindows()` always runs. (`main.py`)

@@ -60,6 +60,10 @@ class TensorStreamServer:
         """Set callback for fetch_object/hand_over commands. Called with (label, hand_over)."""
         self._interaction_callback = callback
 
+    def set_protocol_dispatch(self, callback: Callable) -> None:
+        """Set callback for protocol dispatch. Called with (protocol_name, params) -> InteractionResult."""
+        self._protocol_dispatch = callback
+
     async def register(self, websocket: ServerConnection) -> None:
         self.clients.add(websocket)
         self._client_queues[websocket] = asyncio.Queue(maxsize=self.MAX_CLIENT_QUEUE)
@@ -192,6 +196,14 @@ class TensorStreamServer:
                         websocket, "throw_away", source=label,
                     ))
 
+            elif command == "run_protocol":
+                protocol_name = data.get("protocol")
+                params = data.get("params", {})
+                if protocol_name and hasattr(self, '_protocol_dispatch') and self._protocol_dispatch:
+                    asyncio.create_task(self._handle_protocol(
+                        websocket, protocol_name, params,
+                    ))
+
         except json.JSONDecodeError as e:
             logger.debug(f"Malformed JSON from client: {e}")
 
@@ -235,6 +247,24 @@ class TensorStreamServer:
             await websocket.send(json.dumps({
                 "type": "error",
                 "detail": f"Interaction failed: {e}",
+            }))
+
+    async def _handle_protocol(self, websocket: ServerConnection,
+                               protocol_name: str, params: dict) -> None:
+        """Handle a run_protocol command from the dashboard."""
+        try:
+            result = await self._protocol_dispatch(protocol_name, params)
+            await websocket.send(json.dumps({
+                "type": "interaction_result",
+                "action": result.action,
+                "label": result.object_label,
+                "success": result.success,
+                "message": result.message,
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "detail": f"Protocol failed: {e}",
             }))
 
     def _state_sync_with_modes(self) -> str:

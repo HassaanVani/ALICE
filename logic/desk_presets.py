@@ -1,8 +1,8 @@
 """Desk layout presets — named configurations for how a desk should be organized.
 
 Each preset defines where categories of objects belong for a specific activity
-(studying, drawing, working, etc.). The desk organization FSM and audience
-voting system use these to drive ALICE's tidying behavior.
+(studying, drawing, working, etc.). The desk organization FSM uses these
+to drive ALICE's tidying behavior.
 
 Positions are relative to the desk center (0,0) in centimeters, with
 x+ right, y+ away from user.

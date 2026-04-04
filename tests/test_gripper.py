@@ -264,14 +264,6 @@ class TestGripObjectWithPersonality:
             g.grip_object("pen", origin=ActionOrigin.USER_REQUESTED)
             mock_send.assert_called_once_with(80, 50)
 
-    def test_grip_crowd_requested_slightly_slower(self, parallel_gripper_with_personality):
-        """ActionOrigin.CROWD_REQUESTED should multiply speed by 0.9."""
-        g = parallel_gripper_with_personality
-        # Pen base speed = 50; crowd -> 50 * 0.9 = 45
-        with patch.object(g, '_send', wraps=g._send) as mock_send:
-            g.grip_object("pen", origin=ActionOrigin.CROWD_REQUESTED)
-            mock_send.assert_called_once_with(80, 45)
-
     def test_grip_no_personality_no_origin_uses_base(self, parallel_gripper):
         """Without personality engine, origin is ignored — base speed used."""
         with patch.object(parallel_gripper, '_send', wraps=parallel_gripper._send) as mock_send:

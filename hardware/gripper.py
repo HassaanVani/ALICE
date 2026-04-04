@@ -224,8 +224,6 @@ class ParallelGripper(Gripper):
             return max(1, int(base_speed * 0.5))
         elif origin == ActionOrigin.SELF_INITIATED:
             return min(100, int(base_speed * 1.3))
-        elif origin == ActionOrigin.CROWD_REQUESTED:
-            return max(1, int(base_speed * 0.9))
         else:
             return base_speed
 

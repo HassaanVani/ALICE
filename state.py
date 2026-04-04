@@ -40,9 +40,8 @@ class AliceState:
     personality_is_in_flow: bool = False
     # Object memory (for dashboard)
     object_memory: List[Dict] = field(default_factory=list)
-    # Desk preset voting
+    # Desk preset
     active_preset: str = ""
-    preset_votes: Dict[str, int] = field(default_factory=dict)
     # Presence
     presence_detected: bool = False
     presence_count: int = 0
@@ -89,7 +88,6 @@ class AliceState:
             "personality_is_in_flow": self.personality_is_in_flow,
             "object_memory": self.object_memory,
             "active_preset": self.active_preset,
-            "preset_votes": self.preset_votes,
             "presence_detected": self.presence_detected,
             "presence_count": self.presence_count,
             "presence_distance": self.presence_distance,
@@ -198,10 +196,8 @@ class AliceStateManager:
         self._state.object_memory = objects
         self._notify()
 
-    def update_preset_votes(self, votes: Dict[str, int], active: str = "") -> None:
-        self._state.preset_votes = votes
-        if active:
-            self._state.active_preset = active
+    def update_active_preset(self, active: str) -> None:
+        self._state.active_preset = active
         self._notify()
 
     def update_presence(self, detected: bool = False, count: int = 0,

@@ -6,7 +6,6 @@ rather than crash. Each subsystem has its own fallback strategy:
 - Camera disconnect → switch to last cached frame, log warning
 - Arm timeout → retry once, then skip move and continue
 - Gripper failure → retry with backoff, then leave object
-- WebSocket drop → audience server continues with cached state
 - YOLO model error → fall back to simulation detections
 """
 

@@ -8,7 +8,6 @@ from narration_prompts import (
     override_prompt,
     spill_prompt,
     presence_prompt,
-    crowd_vote_prompt,
     question_prompt,
     tetris_interrupt_prompt,
     mode_switch_prompt,
@@ -56,14 +55,6 @@ class TestPrompts:
     def test_presence_prompt_leaving(self):
         result = presence_prompt(entering=False)
         assert "[silence]" in result
-
-    def test_crowd_vote_agrees(self):
-        result = crowd_vote_prompt("organize for studying", agrees=True)
-        assert "organize" in result
-
-    def test_crowd_vote_disagrees(self):
-        result = crowd_vote_prompt("stack everything", agrees=False)
-        assert "reluctantly" in result.lower() or "disagree" in result.lower()
 
     def test_question_prompt(self):
         result = question_prompt("Why did you put the pens there?")

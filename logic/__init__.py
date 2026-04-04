@@ -24,3 +24,8 @@ from .habits import HabitEngine, Habit, BehaviorPattern
 from .body_language import BodyLanguage, PostureOverlay
 from .proactive import ProactiveEngagement, EngagementAction, EngagementDecision
 from .llm_interpreter import LLMInterpreter, MovementModifiers
+from .protocols import (
+    Protocol, ProtocolSpec, ProtocolParam, ProtocolContext,
+    ProtocolRegistry, ProtocolSelector,
+    build_registry, build_selector,
+)

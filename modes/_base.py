@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from logic.personality import PersonalityEngine
     from state import AliceStateManager
     from recording import SessionRecorder
-    from audience_server import AudienceServer
     from narration import NarrationService
     from puppet_server import PuppetServer
     from server import TensorStreamServer
@@ -40,7 +39,6 @@ class ModeContext:
     kinesthetic: Optional[KinestheticTeacher]
     state_manager: AliceStateManager
     recorder: SessionRecorder
-    audience_server: AudienceServer
     narration: NarrationService
     puppet_server: PuppetServer
     ws_server: TensorStreamServer
@@ -62,6 +60,7 @@ class ModeContext:
     object_memory: Any = None
     presence_detector: Any = None
     llm_interpreter: Any = None
+    registry: Any = None
 
     def running(self) -> bool:
         """True while the system is running AND still in this mode."""

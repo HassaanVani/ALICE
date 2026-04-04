@@ -1,7 +1,7 @@
 """Desk Organization FSM — ALICE tidies the desk according to presets.
 
 State machine for autonomous desk organization:
-1. IDLE — waiting for trigger (audience vote, user command, or self-initiated)
+1. IDLE — waiting for trigger (user command or self-initiated)
 2. SCANNING — running YOLO + depth to assess current desk state
 3. PLANNING — comparing current state to target preset, generating move list
 4. EXECUTING — picking and placing objects to match the target layout
@@ -9,8 +9,8 @@ State machine for autonomous desk organization:
 6. COMPLETE — done, return to idle
 
 The organizer works with the personality engine: self-initiated tidying is
-faster and more confident, crowd-requested is slightly slower, and if ALICE
-disagrees with a requested layout she hesitates before complying.
+faster and more confident, and if ALICE disagrees with a requested layout
+she hesitates before complying.
 """
 
 import asyncio

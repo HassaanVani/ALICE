@@ -277,7 +277,6 @@ SATISFIED  = "satisfied"   # just finished a self-initiated task
 ```python
 SELF_INITIATED:   1.3    # faster — she wants to do this
 USER_REQUESTED:   1.0    # baseline
-CROWD_REQUESTED:  0.9    # slightly slower — less personal
 OVERRIDE:         0.6    # noticeably slow — she disagrees
 ```
 
@@ -336,7 +335,6 @@ personality:
   override_comment_threshold: 3
   speed_self_initiated: 1.3
   speed_user_requested: 1.0
-  speed_crowd_requested: 0.9
   speed_override: 0.6
   idle_micro_motion_delay: 3.0
   idle_tetris_delay: 30.0

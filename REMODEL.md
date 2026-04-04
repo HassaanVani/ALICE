@@ -231,7 +231,6 @@ The 3D spatial model replaces the 2D minimap in the Spatial Preferences panel. T
 | Gripper (`hardware/gripper.py`) | Pick/place | Same |
 | Sort FSM (`logic/sort_logic.py`) | Autonomous sorting | Desk organization state machine |
 | Tetris agent (`logic/tetris_agent.py`) | Tetris demo mode | Idle personality behavior |
-| Audience server (`audience_server.py`) | Crowd voting on sort moves | Task request / layout voting |
 | Tensor server (`server.py`) | CNN activation streaming | Glass brain feed (YOLO/depth model activations) for product UI |
 | Puppet server (`puppet_server.py`) | Hand teleoperation | Teaching mode input |
 | Narration (`narration.py`) | Third-person LLM commentary | ALICE's first-person voice |
@@ -281,7 +280,7 @@ The 3D spatial model replaces the 2D minimap in the Spatial Preferences panel. T
 #### 3. Desk Layout Presets ✓
 - `logic/desk_presets.py` — 4 built-in presets: studying, drawing, working, clean
 - Each defines target positions by YOLO label with priority and zone
-- Audience votes on presets during Act 5 via `audience_server.py`
+- ALICE picks presets based on her own preferences during Act 5
 - Custom presets via `register_preset()`
 
 #### 4. Personality Engine ✓
@@ -412,11 +411,10 @@ The dashboard is already visible throughout the demo. But in Act 6, it fills the
 - [x] Parallel gripper driver → `hardware/gripper.py:ParallelGripper`
 
 ### Phase 3: Experience Design ✓ COMPLETE
-*The demo arc and audience-facing systems.*
+*The demo arc and interaction systems.*
 
 - [x] Performance mode — 6-act arc runner → `modes/performance.py`
 - [x] Tea spill choreography (3-beat: warning → override → "told you") → `logic/tea_choreography.py`
-- [x] Audience server reframe — preset voting + desk phases → `audience_server.py`
 - [x] Teaching mode reframe — "show ALICE where things go" → `logic/teaching.py`
 - [x] Fist bump interaction → `logic/fist_bump.py`
 - [x] Dashboard redesign plan → `dashboard/REDESIGN.md`

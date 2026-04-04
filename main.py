@@ -21,7 +21,6 @@ from modes import (ModeContext, DemoState, IdleRunner,
                    AutoTetrisRunner, CalibrateRunner, PuppeteerRunner,
                    PerformanceRunner)
 from puppet_server import PuppetServer
-from audience_server import AudienceServer
 from narration import NarrationService
 from voice_input import VoiceInputService
 
@@ -77,12 +76,6 @@ class ALICE:
             simulate=config.simulate,
         )
         self.puppet_server.set_state_manager(self.state_manager)
-
-        # Audience
-        self.audience_server = AudienceServer(
-            port=config.websocket.audience_port,
-            state_manager=self.state_manager,
-        )
 
         # Narration
         self.narration = NarrationService(
@@ -199,7 +192,7 @@ class ALICE:
             self.personality.SPEED_MULTIPLIERS = {
                 ActionOrigin.SELF_INITIATED: pc.speed_self_initiated,
                 ActionOrigin.USER_REQUESTED: pc.speed_user_requested,
-                ActionOrigin.CROWD_REQUESTED: pc.speed_crowd_requested,
+
                 ActionOrigin.OVERRIDE: pc.speed_override,
             }
             self.dynamics.MICRO_AMPLITUDE = pc.micro_amplitude_deg
@@ -225,7 +218,40 @@ class ALICE:
             )
             self._ws_server.set_interaction_callback(self._handle_interaction)
 
-            # Voice input — wire to interaction system
+            # --- Protocol registry ---
+            from logic.protocols import build_registry, build_selector, ProtocolContext
+
+            self._registry = build_registry(self._interaction)
+
+            # Build LLM-backed selector if Ollama narration backend is available
+            ollama_gen = None
+            if hasattr(self.narration, '_ollama') and self.narration._ollama:
+                backend = self.narration._ollama
+
+                async def _ollama_gen(prompt: str) -> str:
+                    return await asyncio.to_thread(backend.generate_sync, prompt)
+
+                ollama_gen = _ollama_gen
+
+            self._selector = build_selector(self._registry, ollama_gen)
+
+            # Context factory — builds a ProtocolContext from current state
+            def _make_protocol_ctx(running_check=None):
+                return ProtocolContext(
+                    arm=self.arm, gripper=self.gripper,
+                    calibration=self.calibration, dynamics=self.dynamics,
+                    personality=self.personality, narration=self.narration,
+                    camera_getter=lambda: self.cameras.get_frame(CameraRole.OVERHEAD),
+                    yolo_detector=yolo,
+                    state_manager=self.state_manager,
+                    object_memory=self.object_memory,
+                    presence_detector=self.presence_detector,
+                    running_check=running_check,
+                )
+
+            self._make_protocol_ctx = _make_protocol_ctx
+
+            # Voice input — wire to protocol system + legacy interaction
             self.voice_input.set_interaction(self._interaction)
             self.voice_input.set_personality(self.personality)
             self.voice_input.set_narration(self.narration)
@@ -235,6 +261,23 @@ class ALICE:
             )
             if yolo:
                 self.voice_input.set_yolo(yolo)
+            self.voice_input.set_protocol_dispatch(
+                self._registry, self._selector, _make_protocol_ctx,
+            )
+
+            # Wire protocol dispatch to tensor server for dashboard
+            async def _protocol_dispatch(name, params):
+                proto = self._registry.get(name)
+                if proto is None:
+                    from logic.object_interaction import InteractionResult
+                    return InteractionResult(
+                        success=False, action=name, object_label="",
+                        message=f"unknown protocol: {name}",
+                    )
+                ctx = _make_protocol_ctx()
+                return await proto.execute(params, ctx)
+
+            self._ws_server.set_protocol_dispatch(_protocol_dispatch)
 
             # Inject shared hardware into PuppetServer so it drives the same arm
             self.puppet_server.arm = self.arm
@@ -430,7 +473,6 @@ class ALICE:
             asyncio.create_task(self._ws_server.start(), name="tensor_server"),
             asyncio.create_task(self.puppet_server.start(), name="puppet_server"),
             asyncio.create_task(self._mode_loop(), name="mode_loop"),
-            asyncio.create_task(self.audience_server.start(), name="audience_server"),
             asyncio.create_task(self.narration.start(), name="narration"),
             asyncio.create_task(self.voice_input.start(), name="voice_input"),
         ]
@@ -470,7 +512,7 @@ class ALICE:
             kinesthetic=self.kinesthetic,
             state_manager=self.state_manager,
             recorder=self.recorder,
-            audience_server=self.audience_server,
+
             narration=self.narration,
             puppet_server=self.puppet_server,
             ws_server=self._ws_server,
@@ -488,6 +530,7 @@ class ALICE:
             object_memory=self.object_memory,
             presence_detector=self.presence_detector,
             llm_interpreter=self.llm_interpreter,
+            registry=getattr(self, '_registry', None),
         )
 
     async def _mode_loop(self) -> None:
@@ -532,7 +575,6 @@ class ALICE:
         await self.narration.stop()
         await self._ws_server.stop()
         await self.puppet_server.stop()
-        await self.audience_server.stop()
 
         # Cancel all async tasks with a timeout
         if hasattr(self, '_tasks'):
@@ -597,8 +639,7 @@ async def main():
     # Self-test
     if config.selftest.enabled:
         tester = SelfTest(simulate=config.simulate)
-        ws_ports = [config.websocket.tensor_port, config.websocket.puppet_port,
-                    config.websocket.audience_port]
+        ws_ports = [config.websocket.tensor_port, config.websocket.puppet_port]
         tester.run_all(ws_ports=ws_ports)
 
     # Replay mode

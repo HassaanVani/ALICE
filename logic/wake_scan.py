@@ -4,8 +4,8 @@ A slow, deliberate sweep of the workspace using the arm-mounted camera.
 For each position in the sweep, ALICE captures a frame, runs YOLO detection,
 estimates depth, and integrates into the 3D spatial map.
 
-This is Act 2's personality beat: "She Knows This Desk." The audience
-watches ALICE wake up and perceive her environment.
+This is Act 2's personality beat: "She Knows This Desk." ALICE wakes up
+and perceives her environment.
 
 The scan also populates object memory with what's on the desk, so ALICE
 can notice what changed since last session.

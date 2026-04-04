@@ -31,8 +31,7 @@ class ActionOrigin(Enum):
     """Whether ALICE chose this action or was told to do it."""
     SELF_INITIATED = "self_initiated"
     USER_REQUESTED = "user_requested"
-    CROWD_REQUESTED = "crowd_requested"
-    OVERRIDE = "override"          # user/crowd overriding her preference
+    OVERRIDE = "override"          # user overriding her preference
 
 
 @dataclass
@@ -118,7 +117,6 @@ class PersonalityEngine:
     SPEED_MULTIPLIERS = {
         ActionOrigin.SELF_INITIATED: 1.3,     # faster — she wants to do this
         ActionOrigin.USER_REQUESTED: 1.0,     # baseline
-        ActionOrigin.CROWD_REQUESTED: 0.9,    # slightly slower — less personal
         ActionOrigin.OVERRIDE: 0.6,           # noticeably slow — she disagrees
     }
 
