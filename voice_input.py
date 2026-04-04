@@ -328,6 +328,26 @@ class AudioCapture:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
 
+        # Listening state callbacks — fired from audio thread via call_soon_threadsafe
+        self._on_voice_start: Optional[Callable] = None     # user started speaking
+        self._on_voice_active: Optional[Callable[[float], None]] = None  # energy level while speaking
+        self._on_voice_end: Optional[Callable] = None        # user stopped speaking
+
+    def set_listening_callbacks(self, on_start=None, on_active=None, on_end=None):
+        """Set callbacks for real-time voice activity events.
+
+        These fire from the audio thread — implementations must be thread-safe
+        or use call_soon_threadsafe internally.
+
+        Args:
+            on_start: Called once when voice energy first exceeds threshold.
+            on_active: Called every 100ms while speaking, with normalized energy (0-1).
+            on_end: Called once when silence timeout triggers (user stopped).
+        """
+        self._on_voice_start = on_start
+        self._on_voice_active = on_active
+        self._on_voice_end = on_end
+
     def start(self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue) -> bool:
         if not SD_AVAILABLE:
             logger.warning("sounddevice not installed — audio capture unavailable")
@@ -369,6 +389,8 @@ class AudioCapture:
                             buffer = [chunk.flatten()]
                             record_start = time.time()
                             silence_start = 0.0
+                            # Notify: user started speaking
+                            self._fire_callback(self._on_voice_start)
                     else:
                         buffer.append(chunk.flatten())
 
@@ -381,8 +403,13 @@ class AudioCapture:
                                 recording = False
                                 buffer = []
                                 silence_start = 0.0
+                                # Notify: user stopped speaking
+                                self._fire_callback(self._on_voice_end)
                         else:
                             silence_start = 0.0
+                            # Notify: user is still speaking (with energy level)
+                            norm_energy = min(1.0, energy / (self._energy_threshold * 5))
+                            self._fire_callback(self._on_voice_active, norm_energy)
 
                         # Max duration safety
                         if time.time() - record_start > self._max_record:
@@ -390,9 +417,22 @@ class AudioCapture:
                             recording = False
                             buffer = []
                             silence_start = 0.0
+                            self._fire_callback(self._on_voice_end)
 
         except Exception as e:
             logger.error(f"Audio capture error: {e}")
+
+    def _fire_callback(self, cb, *args) -> None:
+        """Fire a callback from the audio thread onto the async event loop."""
+        if cb is None or self._loop is None:
+            return
+        try:
+            if args:
+                self._loop.call_soon_threadsafe(cb, *args)
+            else:
+                self._loop.call_soon_threadsafe(cb)
+        except RuntimeError:
+            pass  # loop closed
 
     def _emit_utterance(self, buffer: List[np.ndarray]) -> None:
         """Send completed utterance to the async queue."""
@@ -527,6 +567,13 @@ class VoiceInputService:
             energy_threshold=self._energy_threshold,
             silence_timeout_s=self._silence_timeout,
             max_record_s=self._max_record,
+        )
+
+        # Wire real-time listening callbacks for body language while user speaks
+        self._audio.set_listening_callbacks(
+            on_start=self._on_voice_activity_start,
+            on_active=self._on_voice_activity_tick,
+            on_end=self._on_voice_activity_end,
         )
 
         loop = asyncio.get_event_loop()
@@ -736,7 +783,50 @@ class VoiceInputService:
             )
         return None
 
-    # ── Listening personality beats ──────────────────────────────
+    # ── Real-time listening body language (runs while user speaks) ──
+
+    def _on_voice_activity_start(self) -> None:
+        """User started speaking — ALICE orients toward them.
+
+        Triggered from audio thread via call_soon_threadsafe.
+        Fires once at speech onset. She perks up: "I'm listening."
+        """
+        if self._body_language is not None:
+            self._body_language._trigger("attentive")
+
+        if self._personality is not None:
+            self._personality.set_presence(True)
+            from logic.personality import EmotionalState
+            if self._personality.emotional_state not in (
+                EmotionalState.FOCUSED,  # don't interrupt flow state
+            ):
+                self._personality._set_emotional_state(EmotionalState.CURIOUS)
+
+    def _on_voice_activity_tick(self, energy: float) -> None:
+        """User is still speaking — ALICE subtly tracks the voice energy.
+
+        Called every ~100ms with normalized energy (0-1). The attentive
+        posture holds as long as voice is active. On louder speech,
+        she leans in slightly more — she's engaged.
+        """
+        # Refresh the attentive posture hold so it doesn't decay mid-sentence
+        if self._body_language is not None:
+            active = self._body_language._active
+            for a in active:
+                if a.overlay.name == "attentive":
+                    # Reset the start time to keep it alive while user talks
+                    a.start_time = time.time()
+                    break
+
+    def _on_voice_activity_end(self) -> None:
+        """User stopped speaking — let the attentive posture decay naturally.
+
+        No abrupt change. She was listening, now she's processing.
+        The posture overlay will blend out on its own timeline.
+        """
+        pass  # attentive posture decays via its own hold_s + decay_s
+
+    # ── Listening personality beats (fired during processing) ────
 
     async def _on_listening_start(self) -> None:
         """ALICE heard the wake word — she perks up and chirps.
