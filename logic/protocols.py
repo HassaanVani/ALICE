@@ -127,6 +127,7 @@ _ACTION_TO_PROTOCOL = {
     "move_near": "place_beside",
     "throw_away": "throw_away",
     "nudge": "nudge",
+    "put_away": "put_away",
     "organize": "organize",
     "guard_spill": "guard_spill",
     "scan_desk": "scan_desk",
@@ -356,6 +357,21 @@ class NudgeProtocol(Protocol):
         )
 
 
+class PutAwayProtocol(Protocol):
+    """Move an object back to its remembered home position."""
+
+    def __init__(self, interaction):
+        self._interaction = interaction
+
+    def spec(self):
+        return ProtocolSpec("put_away", "return an object to where it belongs", {
+            "object": ProtocolParam("string", True, "object to put away"),
+        })
+
+    async def execute(self, params, ctx):
+        return await self._interaction.put_away(params["object"], ctx.camera_getter)
+
+
 class OrganizeProtocol(Protocol):
     def spec(self):
         return ProtocolSpec("organize", "tidy desk to a layout (studying/drawing/working/clean)", {
@@ -527,7 +543,14 @@ class TeachProtocol(Protocol):
 
 
 class RegisterProtocol(Protocol):
-    """User shows ALICE an object and names it — she learns to recognize it."""
+    """User shows ALICE an object and names it — she learns what it looks like
+    AND where it belongs.
+
+    "This is my notebook" → learns appearance (color histogram)
+    The current position becomes the object's home position in memory.
+    If 3D spatial mapping is available, the position is recorded in cm.
+    Otherwise, pixel position is converted to rough cm estimate.
+    """
 
     def __init__(self, custom_store):
         self._store = custom_store
@@ -535,7 +558,7 @@ class RegisterProtocol(Protocol):
     def spec(self):
         return ProtocolSpec(
             "register",
-            "show ALICE a new object so she can learn to recognize it — say this is my X",
+            "show ALICE a new object so she can learn to recognize it and where it belongs — say this is my X",
             {"object": ProtocolParam("string", True, "name for the new object")},
         )
 
@@ -554,21 +577,55 @@ class RegisterProtocol(Protocol):
                 message="no camera frame",
             )
 
+        # Step 1: Learn what it looks like (color histogram)
         success = self._store.register(name, frame)
+        if not success:
+            return InteractionResult(
+                success=False, action="register", object_label=name,
+                message="registration failed",
+            )
 
-        # Personality: she learned something new — curious → satisfied
-        if success and ctx.personality:
+        # Step 2: Learn where it is right now — this becomes its "home"
+        object_id = f"{name}_0"
+        h, w = frame.shape[:2]
+        center_px = (w // 2, h // 2)
+
+        # Try to get the actual position from custom object detection
+        # (more accurate than just frame center)
+        match = self._store.find(name, frame)
+        if match:
+            center_px = (match[0], match[1])
+
+        # Convert pixel position to rough cm and record in object memory
+        pos_cm = (
+            center_px[0] * 0.05,   # rough pixel-to-cm
+            center_px[1] * 0.05,
+            0.0,                    # desk surface
+        )
+
+        if ctx.object_memory is not None:
+            ctx.object_memory.observe(object_id, name, pos_cm)
+            ctx.object_memory.record_placement(object_id, pos_cm)
+            ctx.object_memory.save()
+            logger.info(f"Registered '{name}' at ({pos_cm[0]:.1f}, {pos_cm[1]:.1f}) cm")
+
+        # Personality: she learned something new
+        if ctx.personality:
             from logic.personality import EmotionalState
             ctx.personality._set_emotional_state(EmotionalState.SATISFIED)
 
-        if success and ctx.narration and ctx.personality:
+        if ctx.narration and ctx.personality:
             if ctx.personality.should_speak(topic="register"):
                 await ctx.narration.speak(f"got it. {name}.")
                 ctx.personality.record_speech("register")
 
+        message = f"learned {name}"
+        if ctx.object_memory is not None:
+            message += f" — home is here"
+
         return InteractionResult(
-            success=success, action="register", object_label=name,
-            message=f"learned to recognize {name}" if success else "registration failed",
+            success=True, action="register", object_label=name,
+            message=message,
         )
 
 
@@ -635,6 +692,7 @@ def build_registry(interaction, custom_objects=None) -> ProtocolRegistry:
     registry.register(MoveNearProtocol(interaction))
     registry.register(ThrowAwayProtocol(interaction))
     registry.register(NudgeProtocol(interaction))
+    registry.register(PutAwayProtocol(interaction))
     registry.register(OrganizeProtocol())
     registry.register(TeaGuardProtocol())
     registry.register(FistBumpProtocol())

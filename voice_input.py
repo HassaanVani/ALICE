@@ -82,6 +82,10 @@ _PATTERNS = [
     (re.compile(r"(?:get|grab|bring|fetch|pick\s+up)\s+(?:me\s+)?(?:the\s+|my\s+)?(?!to\s|going|started|ready|back to|this\s+place)(.+)", re.I), "fetch"),
     (re.compile(r"i\s+need\s+(?:the\s+|my\s+|a\s+)?(.+)", re.I), "fetch"),
 
+    # ── put_away: return object to its remembered home ──
+    (re.compile(r"put\s+(?:the\s+|my\s+)?(.+?)\s+(?:away|back\s+where\s+it\s+(?:goes|belongs|was))", re.I), "put_away"),
+    (re.compile(r"(?:return|move)\s+(?:the\s+|my\s+)?(.+?)\s+(?:to\s+(?:its|where\s+it)\s+(?:place|spot|home|belongs))", re.I), "put_away"),
+
     # ── nudge: push without picking up ──
     (re.compile(r"(?:nudge|push|slide|scoot|shove)\s+(?:the\s+|my\s+)?(.+?)\s+(?:over\s+)?(?:(?:a\s+)?(?:bit|little)\s+)?(?:to\s+the\s+)?(left|right|forward|back)", re.I), "nudge"),
     (re.compile(r"(?:i\s+don'?t\s+want)\s+(?:the\s+|my\s+)?(.+?)\s+(?:there|here)", re.I), "nudge"),

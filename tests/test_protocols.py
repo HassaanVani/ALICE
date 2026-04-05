@@ -126,7 +126,7 @@ class TestBuildRegistry:
         registry = build_registry(interaction)
         expected = [
             "fetch", "hand_over", "place_beside", "throw_away",
-            "nudge", "organize", "guard_spill", "fist_bump",
+            "nudge", "put_away", "organize", "guard_spill", "fist_bump",
             "scan_desk", "teach", "undo", "ignore",
         ]
         for name in expected:
@@ -135,7 +135,7 @@ class TestBuildRegistry:
     def test_build_registry_count(self):
         interaction = mock_interaction()
         registry = build_registry(interaction)
-        assert len(registry.names) == 12
+        assert len(registry.names) == 13
 
 
 # ── Protocol specs ───────────────────────────────────────────────
