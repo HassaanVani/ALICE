@@ -258,14 +258,30 @@ class ProactiveEngagement:
             # If they do, voice_input checks examining_object_id and registers.
             await asyncio.sleep(1.5)
 
-            # 6. Sound: satisfied or thinking
-            await self._sfx.play(SoundCategory.SATISFIED)
+            # 6. Physical manipulation test — can she interact with it?
+            # Only test if the object is registered and untested
+            manip_tested = False
+            if (self._custom_objects is not None and record is not None
+                    and exam_px is not None):
+                obj = self._custom_objects.get(record.label)
+                if obj is None:
+                    obj = self._custom_objects.get(object_id)
+                if obj is not None and obj.can_lift is None:
+                    manip_tested = await self._test_manipulation(
+                        object_id, exam_px, dynamics, record.label,
+                    )
 
-            # 7. Un-tilt
+            # 7. Sound: satisfied (she figured it out) or thinking (still unsure)
+            if manip_tested:
+                await self._sfx.play(SoundCategory.SATISFIED)
+            else:
+                await self._sfx.play(SoundCategory.THINKING)
+
+            # 8. Un-tilt
             dynamics.arm.move_to(current, speed=20)
             await asyncio.sleep(0.3)
 
-            # 8. Clear curiosity target, record examination
+            # 9. Clear curiosity target, record examination
             self._gaze.clear_curiosity_target()
             self._curiosity.record_examination(object_id)
             self._examine_count_minute += 1
@@ -277,6 +293,114 @@ class ProactiveEngagement:
         finally:
             self._examining_object_id = None
             self._examining_position = None
+
+    async def _test_manipulation(
+        self,
+        object_id: str,
+        pixel_pos: tuple,
+        dynamics: "MovementDynamics",
+        label: str,
+    ) -> bool:
+        """Physically test if ALICE can lift or slide an unknown object.
+
+        The sequence: approach → gentle grip → try lift → if fails, try slide.
+        Results are stored on the CustomObject. This is a personality moment —
+        she's learning her own capabilities relative to each object.
+
+        Returns True if the test was performed (regardless of outcome).
+        """
+        from audio.sound_effects import SoundCategory
+
+        arm = dynamics.arm
+        gripper = dynamics._gripper if hasattr(dynamics, '_gripper') else None
+        calibration = None
+
+        # We need calibration to convert pixels to arm angles
+        # Try to get it from the dynamics or skip if unavailable
+        if not hasattr(arm, 'move_to') or gripper is None:
+            return False
+
+        logger.debug(f"Manipulation test: '{label}' at {pixel_pos}")
+
+        # Body language: she's being careful — lean in
+        self._body_language._trigger("lean_in")
+
+        can_lift = False
+        can_slide = False
+
+        try:
+            # Save current position for retract
+            home = arm.position.as_tuple()
+
+            # The arm is already near the object from the examination approach.
+            # Try closing the gripper gently
+            await self._sfx.play(SoundCategory.CURIOUS)
+            gripper.close()
+            await asyncio.sleep(0.3)
+
+            # Try lifting slightly — move shoulder up a few degrees
+            current = arm.position.as_tuple()
+            lift_target = (current[0], current[1] + 8, current[2], current[3])
+            arm.move_to(lift_target, speed=20)
+            await asyncio.sleep(0.5)
+
+            # Check if gripper is still closed (object is gripped)
+            # In simulation, we assume success. With real hardware,
+            # force sensor or gripper position feedback would determine this.
+            grip_pos = gripper.get_position()
+            if grip_pos < 80:  # gripper didn't fully close = something is there
+                can_lift = True
+                logger.debug(f"'{label}' can be lifted (grip_pos={grip_pos})")
+                # Settle back down
+                arm.move_to(current, speed=20)
+                await asyncio.sleep(0.3)
+            else:
+                # Couldn't grip — try sliding instead
+                gripper.open()
+                await asyncio.sleep(0.2)
+                arm.move_to(current, speed=20)
+                await asyncio.sleep(0.3)
+
+                # Nudge attempt: move arm sideways while touching
+                nudge_target = (current[0] + 5, current[1], current[2], current[3])
+                arm.move_to(nudge_target, speed=15)
+                await asyncio.sleep(0.4)
+
+                # If arm completed the motion, the object probably slid
+                # (Without force sensing, we assume the nudge worked
+                # if the arm didn't stall)
+                can_slide = True
+                logger.debug(f"'{label}' can be slid")
+
+            # Release and retract
+            gripper.open()
+            await asyncio.sleep(0.2)
+            arm.move_to(home, speed=30)
+            await asyncio.sleep(0.3)
+
+        except Exception as e:
+            logger.debug(f"Manipulation test failed: {e}")
+            gripper.open()
+
+        # Store results
+        if self._custom_objects is not None:
+            name = label if self._custom_objects.get(label) else object_id
+            if self._custom_objects.get(name):
+                self._custom_objects.record_manipulation_test(name, can_lift, can_slide)
+
+        # Personality response
+        if can_lift:
+            # She can handle it — small satisfied bounce
+            self._body_language._trigger("bounce")
+        elif can_slide:
+            # She can nudge it — settle, she knows her limits
+            self._body_language._trigger("settle")
+        else:
+            # She can't move it at all — droop
+            self._body_language._trigger("droop")
+            await self._sfx.play(SoundCategory.SAD)
+
+        return True
 
     async def _execute_habit(self, habit: "Habit",
                               dynamics: "MovementDynamics",

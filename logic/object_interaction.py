@@ -228,6 +228,23 @@ class ObjectInteraction:
         start = time.time()
         logger.info(f"Fetching '{label}'")
 
+        # Check manipulation capabilities for custom objects
+        if self._custom_objects is not None:
+            manip = self._custom_objects.get_manipulation(label)
+            if manip["tested"]:
+                if manip["can_lift"] is False and manip["can_slide"] is False:
+                    # She knows she can't move this — droop
+                    return InteractionResult(
+                        success=False, action="fetch", object_label=label,
+                        message=f"can't move the {label}",
+                    )
+                if manip["can_lift"] is False and manip["can_slide"] is True:
+                    # She can't lift but can slide — redirect to nudge toward user
+                    logger.info(f"'{label}' can't be lifted — sliding instead")
+                    return await self.nudge(
+                        label, camera_getter, dx_px=0, dy_px=80,
+                    )
+
         # Look for the object
         frame = camera_getter()
         obj_pos = self._find_object(label, frame)

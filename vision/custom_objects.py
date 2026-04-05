@@ -52,6 +52,11 @@ class CustomObject:
     times_found: int = 0
     thumbnail_path: str = ""
 
+    # Manipulation capabilities — discovered by physical testing
+    can_lift: Optional[bool] = None     # None = untested, True/False = tested
+    can_slide: Optional[bool] = None
+    tested_at: float = 0.0
+
     def to_dict(self) -> dict:
         return {
             "name": self.name,
@@ -60,6 +65,9 @@ class CustomObject:
             "last_seen": self.last_seen,
             "times_found": self.times_found,
             "thumbnail_path": self.thumbnail_path,
+            "can_lift": self.can_lift,
+            "can_slide": self.can_slide,
+            "tested_at": self.tested_at,
         }
 
     @staticmethod
@@ -74,6 +82,9 @@ class CustomObject:
             last_seen=data.get("last_seen", 0.0),
             times_found=data.get("times_found", 0),
             thumbnail_path=data.get("thumbnail_path", ""),
+            can_lift=data.get("can_lift"),
+            can_slide=data.get("can_slide"),
+            tested_at=data.get("tested_at", 0.0),
         )
 
 
@@ -295,6 +306,32 @@ class CustomObjectStore:
                 cx, cy, conf = match
                 results.append((name, cx, cy, conf))
         return results
+
+    def record_manipulation_test(self, name: str,
+                                can_lift: bool, can_slide: bool) -> None:
+        """Record the results of a physical manipulation test."""
+        obj = self._objects.get(name)
+        if obj is None:
+            return
+        obj.can_lift = can_lift
+        obj.can_slide = can_slide
+        obj.tested_at = time.time()
+        self.save()
+        logger.info(f"Manipulation test for '{name}': lift={can_lift}, slide={can_slide}")
+
+    def get_manipulation(self, name: str) -> dict:
+        """Get manipulation capabilities for a named object.
+
+        Returns {"can_lift": bool|None, "can_slide": bool|None, "tested": bool}.
+        """
+        obj = self._objects.get(name)
+        if obj is None:
+            return {"can_lift": None, "can_slide": None, "tested": False}
+        return {
+            "can_lift": obj.can_lift,
+            "can_slide": obj.can_slide,
+            "tested": obj.tested_at > 0,
+        }
 
     # ── Persistence ──────────────────────────────────────────────
 
