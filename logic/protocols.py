@@ -132,6 +132,7 @@ _ACTION_TO_PROTOCOL = {
     "scan_desk": "scan_desk",
     "fist_bump": "fist_bump",
     "teach": "teach",
+    "undo": "undo",
     "ignore": "ignore",
 }
 
@@ -524,6 +525,36 @@ class TeachProtocol(Protocol):
             )
 
 
+class UndoProtocol(Protocol):
+    """Reverse ALICE's last move — swap pick and place positions."""
+
+    def __init__(self, interaction):
+        self._interaction = interaction
+
+    def spec(self):
+        return ProtocolSpec(
+            "undo",
+            "undo the last action — put the object back where it was",
+            {},
+        )
+
+    async def execute(self, params, ctx):
+        # She knows she got it wrong — slight droop
+        if ctx.personality is not None:
+            from logic.personality import EmotionalState
+            ctx.personality._set_emotional_state(EmotionalState.RELUCTANT)
+
+        result = await self._interaction.undo()
+
+        # Narrate only if she has something to say
+        if result.success and ctx.narration and ctx.personality:
+            if ctx.personality.should_speak(topic="undo"):
+                await ctx.narration.speak("noted.")
+                ctx.personality.record_speech("undo")
+
+        return result
+
+
 class IgnoreProtocol(Protocol):
     """Do nothing — the user said something that doesn't map to an action."""
 
@@ -562,6 +593,7 @@ def build_registry(interaction, kinesthetic=None) -> ProtocolRegistry:
     registry.register(FistBumpProtocol())
     registry.register(WakeScanProtocol())
     registry.register(TeachProtocol())
+    registry.register(UndoProtocol(interaction))
     registry.register(IgnoreProtocol())
 
     logger.info(f"Protocol registry: {len(registry.names)} protocols registered")

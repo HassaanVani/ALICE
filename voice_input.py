@@ -117,6 +117,9 @@ _PATTERNS = [
     (re.compile(r"(?:remember|memorize)\s+(?:this\s+(?:spot|place|position)\s+(?:for\s+)?|where\s+)(?:the\s+|my\s+)?(.+)", re.I), "teach"),
     (re.compile(r"this\s+is\s+where\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:goes|belongs|live[sd]?|should\s+(?:go|be)))\s*$", re.I), "teach"),
 
+    # ── undo: reverse last action ──
+    (re.compile(r"(?:undo|undo\s+that|put\s+(?:it|that)\s+back|never\s*mind\s+put\s+it\s+back|reverse\s+that|take\s+(?:it|that)\s+back|no\s+(?:not\s+there|put\s+it\s+back|wrong))", re.I), "undo"),
+
     # ── ignore: greetings, social, non-commands ──
     (re.compile(r"^(?:hey|hey\s+alice|hi|hello|yo|sup|thanks|thank\s+you(?:\s+alice)?|never\s+mind|nah|nope|okay|ok|ok\s+cool|sure|cool|bye|good\s+(?:morning|night|evening)|what'?s?\s+up)\.?$", re.I), "ignore"),
 ]

@@ -118,6 +118,48 @@ class ObjectInteraction:
         self._trash = trash_zone or TrashZone()
         self._busy = asyncio.Lock()
 
+        # Last successful move — for undo
+        self._last_move: Optional[Dict] = None  # {"pick": (x,y), "place": (x,y), "label": str}
+
+    async def _pick_and_place(self, pick_px, place_px, label: str,
+                              config=None) -> bool:
+        """Run pick_and_place and record the move for undo."""
+        from logic.arm_routines import pick_and_place
+        success = await pick_and_place(
+            self._arm, self._gripper, self._calibration,
+            pick_px=pick_px, place_px=place_px, config=config,
+        )
+        if success:
+            self._last_move = {
+                "pick": pick_px,
+                "place": place_px,
+                "label": label,
+            }
+        return success
+
+    async def undo(self) -> InteractionResult:
+        """Reverse the last successful move — swap pick and place."""
+        if self._last_move is None:
+            return InteractionResult(
+                success=False, action="undo", object_label="",
+                message="nothing to undo",
+            )
+        pick = self._last_move["place"]   # object is now at the place position
+        place = self._last_move["pick"]   # move it back to where it was
+        label = self._last_move["label"]
+
+        from logic.arm_routines import pick_and_place
+        success = await pick_and_place(
+            self._arm, self._gripper, self._calibration,
+            pick_px=pick, place_px=place,
+        )
+        if success:
+            self._last_move = None  # can't undo an undo
+        return InteractionResult(
+            success=success, action="undo", object_label=label,
+            message=f"moved {label} back" if success else f"undo failed",
+        )
+
     def _detect_all(self, frame) -> list:
         """Run YOLO once and return all detections."""
         if frame is None or self._yolo is None:
@@ -181,13 +223,10 @@ class ObjectInteraction:
         target = place_px or (self._handoff.pixel_x, self._handoff.pixel_y)
 
         # Pick and place with personality
-        from logic.arm_routines import pick_and_place, PickPlaceConfig
+        from logic.arm_routines import PickPlaceConfig
         config = PickPlaceConfig(z_lift=self._handoff.hold_height_z)
 
-        success = await pick_and_place(
-            self._arm, self._gripper, self._calibration,
-            pick_px=obj_pos, place_px=target, config=config,
-        )
+        success = await self._pick_and_place(obj_pos, target, label, config=config)
 
         duration = time.time() - start
 
@@ -327,11 +366,7 @@ class ObjectInteraction:
 
         target = (obj_pos[0] + dx_px, obj_pos[1] + dy_px)
 
-        from logic.arm_routines import pick_and_place
-        success = await pick_and_place(
-            self._arm, self._gripper, self._calibration,
-            pick_px=obj_pos, place_px=target,
-        )
+        success = await self._pick_and_place(obj_pos, target, label)
 
         return InteractionResult(
             success=success, action="nudge", object_label=label,
@@ -374,11 +409,7 @@ class ObjectInteraction:
         if target is None:
             target = (320, 80)
 
-        from logic.arm_routines import pick_and_place
-        success = await pick_and_place(
-            self._arm, self._gripper, self._calibration,
-            pick_px=obj_pos, place_px=target,
-        )
+        success = await self._pick_and_place(obj_pos, target, label)
 
         if success and self._memory:
             obj_id = f"{label}_0"
@@ -431,11 +462,8 @@ class ObjectInteraction:
         # Smart placement: pick the side of target with most free space
         place_pos = self._compute_placement_near(target, detections, source, offset_px)
 
-        from logic.arm_routines import pick_and_place
-        success = await pick_and_place(
-            self._arm, self._gripper, self._calibration,
-            pick_px=(source.center_x, source.center_y),
-            place_px=place_pos,
+        success = await self._pick_and_place(
+            (source.center_x, source.center_y), place_pos, source_label,
         )
 
         if success and self._memory:
@@ -539,11 +567,7 @@ class ObjectInteraction:
             if bin_det:
                 trash_target = (bin_det.center_x, bin_det.center_y)
 
-        from logic.arm_routines import pick_and_place
-        success = await pick_and_place(
-            self._arm, self._gripper, self._calibration,
-            pick_px=obj_pos, place_px=trash_target,
-        )
+        success = await self._pick_and_place(obj_pos, trash_target, label)
 
         # Forget from memory — it's been discarded
         if success and self._memory:

@@ -23,6 +23,7 @@ from logic.protocols import (
     WakeScanProtocol,
     TeachProtocol,
     IgnoreProtocol,
+    UndoProtocol,
     build_registry,
     build_selector,
 )
@@ -126,7 +127,7 @@ class TestBuildRegistry:
         expected = [
             "fetch", "hand_over", "place_beside", "throw_away",
             "nudge", "organize", "guard_spill", "fist_bump",
-            "scan_desk", "teach", "ignore",
+            "scan_desk", "teach", "undo", "ignore",
         ]
         for name in expected:
             assert registry.get(name) is not None, f"Missing protocol: {name}"
@@ -134,7 +135,7 @@ class TestBuildRegistry:
     def test_build_registry_count(self):
         interaction = mock_interaction()
         registry = build_registry(interaction)
-        assert len(registry.names) == 11
+        assert len(registry.names) == 12
 
 
 # ── Protocol specs ───────────────────────────────────────────────
@@ -286,6 +287,17 @@ class TestProtocolSelector:
         assert name == "hand_over"
         assert params["object"] == "pen"
 
+    def test_regex_fast_path_undo(self):
+        interaction = mock_interaction()
+        registry = build_registry(interaction)
+        selector = build_selector(registry)
+
+        for text in ["undo", "undo that", "put it back", "no not there", "no wrong"]:
+            result = selector._try_regex(text)
+            assert result is not None, f"'{text}' should match undo"
+            name, _ = result
+            assert name == "undo", f"'{text}' got {name} instead of undo"
+
     def test_regex_unknown_returns_none(self):
         interaction = mock_interaction()
         registry = build_registry(interaction)
@@ -370,6 +382,43 @@ class TestFistBumpProtocol:
 
 
 # ── ProtocolContext ──────────────────────────────────────────────
+
+class TestUndoProtocol:
+    def test_undo_spec(self):
+        interaction = mock_interaction()
+        spec = UndoProtocol(interaction).spec()
+        assert spec.name == "undo"
+        assert len(spec.params) == 0
+
+    @pytest.mark.asyncio
+    async def test_undo_no_last_move(self):
+        interaction = mock_interaction()
+        interaction._last_move = None
+        interaction.undo = AsyncMock(return_value=InteractionResult(
+            success=False, action="undo", object_label="",
+            message="nothing to undo",
+        ))
+        proto = UndoProtocol(interaction)
+        ctx = mock_ctx()
+        ctx.personality = None
+        result = await proto.execute({}, ctx)
+        assert result.success is False
+        assert "nothing to undo" in result.message
+
+    @pytest.mark.asyncio
+    async def test_undo_reverses_last_move(self):
+        interaction = mock_interaction()
+        interaction.undo = AsyncMock(return_value=InteractionResult(
+            success=True, action="undo", object_label="pen",
+            message="moved pen back",
+        ))
+        proto = UndoProtocol(interaction)
+        ctx = mock_ctx()
+        ctx.personality = None
+        result = await proto.execute({}, ctx)
+        assert result.success is True
+        assert result.object_label == "pen"
+
 
 class TestIgnoreProtocol:
     def test_ignore_spec(self):
