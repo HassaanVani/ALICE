@@ -105,6 +105,7 @@ _PATTERNS = [
     (re.compile(r"(?:can\s+you\s+see|do\s+you\s+see|is)\s+(?:the\s+|my\s+)?(\w+)\s+(?:still\s+)?(?:there|here|anywhere|on the desk)", re.I), "scan_desk"),
     (re.compile(r"(?:where\s+(?:is|are)\s+(?:the\s+|my\s+)?)", re.I), "scan_desk"),
     (re.compile(r"(?:can'?t|cannot)\s+find", re.I), "scan_desk"),
+    (re.compile(r"who\s+(?:put|left|placed|moved)\s+(?:the\s+|my\s+)?(.+?)\s+(?:there|here|on the desk)", re.I), "scan_desk"),
 
     # ── scan_desk: "have you seen X", "where did i put X", "can you find X" ──
     (re.compile(r"(?:have\s+you\s+seen|where\s+did\s+i\s+put|do\s+you\s+know\s+where)\s+(?:the\s+|my\s+)?(.+)", re.I), "scan_desk"),
@@ -119,9 +120,13 @@ _PATTERNS = [
 
     # ── undo: reverse last action ──
     (re.compile(r"(?:undo|undo\s+that|put\s+(?:it|that)\s+back|never\s*mind\s+put\s+it\s+back|reverse\s+that|take\s+(?:it|that)\s+back|no\s+(?:not\s+there|put\s+it\s+back|wrong))", re.I), "undo"),
+    (re.compile(r"(?:didn'?t|did\s+not|don'?t)\s+mean\s+that", re.I), "undo"),
+    (re.compile(r"(?:that'?s|thats)\s+not\s+(?:what\s+i\s+wanted|right|correct)", re.I), "undo"),
+    (re.compile(r"(?:wrong|nope)\s+(?:spot|place|one|position)", re.I), "undo"),
+    (re.compile(r"(?:wait|hold\s+on)\s+(?:go\s+back|no|stop)", re.I), "undo"),
 
     # ── ignore: greetings, social, non-commands ──
-    (re.compile(r"^(?:hey|hey\s+alice|hi|hello|yo|sup|thanks|thank\s+you(?:\s+alice)?|never\s+mind|nah|nope|okay|ok|ok\s+cool|sure|cool|bye|good\s+(?:morning|night|evening)|what'?s?\s+up)\.?$", re.I), "ignore"),
+    (re.compile(r"^(?:hey|hey\s+alice|hi|hello|yo|sup|thanks|thank\s+you(?:\s+alice)?|never\s+mind|nah|nope|okay|ok|ok\s+cool|sure|cool|bye|good\s+(?:morning|night|evening)|what'?s?\s+up|alice)\.?$", re.I), "ignore"),
 ]
 
 
