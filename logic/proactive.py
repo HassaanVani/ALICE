@@ -92,13 +92,33 @@ class ProactiveEngagement:
         self._executing = False
         self._llm_interpreter = None
 
+        # Currently examining — set during examination so voice input can
+        # route "this is my X" to register with the right bbox/position
+        self._examining_object_id: Optional[str] = None
+        self._examining_position: Optional[tuple] = None  # (px, py) in pixels
+        self._custom_objects = None
+
     def set_llm_interpreter(self, interp) -> None:
         """Attach LLM interpreter for dynamic examination modulation."""
         self._llm_interpreter = interp
 
+    def set_custom_objects(self, store) -> None:
+        """Attach custom object store for registering unknowns during examination."""
+        self._custom_objects = store
+
     @property
     def is_executing(self) -> bool:
         return self._executing
+
+    @property
+    def examining_object_id(self) -> Optional[str]:
+        """The object ALICE is currently examining, or None."""
+        return self._examining_object_id
+
+    @property
+    def examining_position(self) -> Optional[tuple]:
+        """Pixel position (px, py) of the object being examined."""
+        return self._examining_position
 
     def decide(self, presence_info: Optional["PresenceInfo"] = None) -> EngagementDecision:
         """Decide what ALICE should do right now. Returns NONE most of the time."""
@@ -166,7 +186,7 @@ class ProactiveEngagement:
         try:
             if decision.action == EngagementAction.EXAMINE_OBJECT:
                 return await self._examine_object(
-                    decision.target_object, dynamics
+                    decision.target_object, dynamics, camera_getter
                 )
             elif decision.action == EngagementAction.EXECUTE_HABIT:
                 return await self._execute_habit(
@@ -182,56 +202,81 @@ class ProactiveEngagement:
             self._executing = False
 
     async def _examine_object(self, object_id: str,
-                               dynamics: "MovementDynamics") -> bool:
-        """The examination sequence: look, approach, tilt, hold, retract."""
+                               dynamics: "MovementDynamics",
+                               camera_getter: Optional[Callable] = None,
+                               ) -> bool:
+        """The examination sequence: look, approach, tilt, hold, retract.
+
+        While holding (the "what is this?" moment), ALICE is available for
+        the user to name the object. If voice_input receives "this is my X"
+        during this window, it checks examining_object_id and registers it
+        with the right position.
+        """
         from audio.sound_effects import SoundCategory
 
         logger.debug(f"Examining object: {object_id}")
         self._body_language.on_event("examination_start")
 
-        # 1. Sound: curious
-        await self._sfx.play(SoundCategory.CURIOUS)
-
-        # 2. Set gaze to the object
+        # Track what we're examining so voice input can route registration
         record = self._curiosity.records.get(object_id)
+        exam_px = None
         if record and record.last_position:
-            px, py = record.last_position[0], record.last_position[1]
-            self._gaze.set_curiosity_target(record.label, int(px), int(py))
+            exam_px = (int(record.last_position[0]), int(record.last_position[1]))
 
-        # 3. Let gaze tracking move the arm toward it (several ticks)
-        for _ in range(8):
-            await self._gaze.apply(dynamics)
-            await asyncio.sleep(0.1)
+        self._examining_object_id = object_id
+        self._examining_position = exam_px
 
-        # 4. Small tilt — the "head tilt" of curiosity (LLM-modulated)
-        current = dynamics.arm.position.as_tuple()
-        tilt_amount = 8.0
-        approach_speed = 25
-        if self._llm_interpreter is not None:
-            tilt_amount *= self._llm_interpreter.modifiers.tilt
-            approach_speed = int(approach_speed * self._llm_interpreter.modifiers.appr)
-        tilted = (current[0], current[1], current[2], current[3] + tilt_amount)
-        dynamics.arm.move_to(tilted, speed=approach_speed)
-        await asyncio.sleep(0.5)
+        try:
+            # 1. Sound: curious
+            await self._sfx.play(SoundCategory.CURIOUS)
 
-        # 5. Hold — forming an opinion
-        await asyncio.sleep(0.4)
+            # 2. Set gaze to the object
+            if exam_px:
+                self._gaze.set_curiosity_target(
+                    record.label if record else object_id,
+                    exam_px[0], exam_px[1],
+                )
 
-        # 6. Sound: satisfied or thinking
-        await self._sfx.play(SoundCategory.SATISFIED)
+            # 3. Let gaze tracking move the arm toward it (several ticks)
+            for _ in range(8):
+                await self._gaze.apply(dynamics)
+                await asyncio.sleep(0.1)
 
-        # 7. Un-tilt
-        dynamics.arm.move_to(current, speed=20)
-        await asyncio.sleep(0.3)
+            # 4. Small tilt — the "head tilt" of curiosity (LLM-modulated)
+            current = dynamics.arm.position.as_tuple()
+            tilt_amount = 8.0
+            approach_speed = 25
+            if self._llm_interpreter is not None:
+                tilt_amount *= self._llm_interpreter.modifiers.tilt
+                approach_speed = int(approach_speed * self._llm_interpreter.modifiers.appr)
+            tilted = (current[0], current[1], current[2], current[3] + tilt_amount)
+            dynamics.arm.move_to(tilted, speed=approach_speed)
+            await asyncio.sleep(0.5)
 
-        # 8. Clear curiosity target, record examination
-        self._gaze.clear_curiosity_target()
-        self._curiosity.record_examination(object_id)
-        self._examine_count_minute += 1
-        self._last_examine_time = time.time()
+            # 5. Hold — the "what is this?" moment
+            # User can name the object during this window.
+            # If they do, voice_input checks examining_object_id and registers.
+            await asyncio.sleep(1.5)
 
-        logger.debug(f"Examination complete: {object_id}")
-        return True
+            # 6. Sound: satisfied or thinking
+            await self._sfx.play(SoundCategory.SATISFIED)
+
+            # 7. Un-tilt
+            dynamics.arm.move_to(current, speed=20)
+            await asyncio.sleep(0.3)
+
+            # 8. Clear curiosity target, record examination
+            self._gaze.clear_curiosity_target()
+            self._curiosity.record_examination(object_id)
+            self._examine_count_minute += 1
+            self._last_examine_time = time.time()
+
+            logger.debug(f"Examination complete: {object_id}")
+            return True
+
+        finally:
+            self._examining_object_id = None
+            self._examining_position = None
 
     async def _execute_habit(self, habit: "Habit",
                               dynamics: "MovementDynamics",

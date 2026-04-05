@@ -357,6 +357,11 @@ class ALICE:
                 self.voice_input.set_body_language(self.body_language)
                 self.voice_input.set_sound_effects(self.sound_effects_engine)
                 self.voice_input.set_dynamics(self.dynamics)
+                self.voice_input.set_proactive(self.proactive)
+
+                # Wire custom object store into proactive for examination registration
+                if hasattr(self, '_custom_objects'):
+                    self.proactive.set_custom_objects(self._custom_objects)
 
                 logger.info("Living behaviors initialized")
 

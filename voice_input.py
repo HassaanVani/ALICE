@@ -517,6 +517,7 @@ class VoiceInputService:
         # Listening personality (optional — body language + sound while processing)
         self._sound_effects = None
         self._dynamics = None
+        self._proactive = None
 
     def set_interaction(self, interaction) -> None:
         self._interaction = interaction
@@ -560,6 +561,10 @@ class VoiceInputService:
     def set_dynamics(self, dynamics) -> None:
         """Attach movement dynamics for attentive orientation while listening."""
         self._dynamics = dynamics
+
+    def set_proactive(self, proactive) -> None:
+        """Attach proactive engagement for contextual registration."""
+        self._proactive = proactive
 
     async def start(self) -> None:
         """Start the voice input service."""
@@ -774,6 +779,14 @@ class VoiceInputService:
             params["direction"] = cmd.target_label
         elif cmd.source_label:
             params["object"] = cmd.source_label
+
+        # Contextual registration: if ALICE is examining an unknown object
+        # and the user names it, pass the examination position as a bbox hint
+        if protocol_name == "register" and self._proactive is not None:
+            exam_pos = self._proactive.examining_position
+            if exam_pos is not None:
+                params["_exam_position"] = exam_pos
+                logger.info(f"Contextual registration: examining at {exam_pos}")
 
         ctx = self._protocol_ctx_factory()
         return await protocol.execute(params, ctx)

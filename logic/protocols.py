@@ -577,8 +577,22 @@ class RegisterProtocol(Protocol):
                 message="no camera frame",
             )
 
+        # If ALICE is currently examining this object (curiosity approach),
+        # use the examination position for a tighter crop and accurate home position
+        exam_pos = params.get("_exam_position")
+        bbox = None
+        if exam_pos is not None:
+            # Build a bbox around the examination point
+            px, py = exam_pos
+            crop_radius = 80  # pixels
+            h, w = frame.shape[:2]
+            bbox = (
+                max(0, px - crop_radius), max(0, py - crop_radius),
+                min(w, px + crop_radius), min(h, py + crop_radius),
+            )
+
         # Step 1: Learn what it looks like (color histogram)
-        success = self._store.register(name, frame)
+        success = self._store.register(name, frame, bbox=bbox)
         if not success:
             return InteractionResult(
                 success=False, action="register", object_label=name,
@@ -588,13 +602,16 @@ class RegisterProtocol(Protocol):
         # Step 2: Learn where it is right now — this becomes its "home"
         object_id = f"{name}_0"
         h, w = frame.shape[:2]
-        center_px = (w // 2, h // 2)
 
-        # Try to get the actual position from custom object detection
-        # (more accurate than just frame center)
-        match = self._store.find(name, frame)
-        if match:
-            center_px = (match[0], match[1])
+        # Use examination position if available (most accurate — ALICE is looking right at it)
+        if exam_pos is not None:
+            center_px = exam_pos
+        else:
+            # Fall back to detection or frame center
+            center_px = (w // 2, h // 2)
+            match = self._store.find(name, frame)
+            if match:
+                center_px = (match[0], match[1])
 
         # Convert pixel position to rough cm and record in object memory
         pos_cm = (
