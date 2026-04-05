@@ -220,8 +220,14 @@ class ALICE:
 
             # --- Protocol registry ---
             from logic.protocols import build_registry, build_selector, ProtocolContext
+            from vision.custom_objects import CustomObjectStore
 
-            self._registry = build_registry(self._interaction)
+            # Custom object store — lets users register objects YOLO can't see
+            self._custom_objects = CustomObjectStore()
+            self._custom_objects.load()
+            self._interaction.set_custom_objects(self._custom_objects)
+
+            self._registry = build_registry(self._interaction, self._custom_objects)
 
             # Build LLM-backed selector if Ollama narration backend is available
             ollama_gen = None

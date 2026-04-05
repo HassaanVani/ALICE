@@ -133,6 +133,7 @@ _ACTION_TO_PROTOCOL = {
     "fist_bump": "fist_bump",
     "teach": "teach",
     "undo": "undo",
+    "register": "register",
     "ignore": "ignore",
 }
 
@@ -525,6 +526,52 @@ class TeachProtocol(Protocol):
             )
 
 
+class RegisterProtocol(Protocol):
+    """User shows ALICE an object and names it — she learns to recognize it."""
+
+    def __init__(self, custom_store):
+        self._store = custom_store
+
+    def spec(self):
+        return ProtocolSpec(
+            "register",
+            "show ALICE a new object so she can learn to recognize it — say this is my X",
+            {"object": ProtocolParam("string", True, "name for the new object")},
+        )
+
+    async def execute(self, params, ctx):
+        name = params.get("object", "").strip()
+        if not name:
+            return InteractionResult(
+                success=False, action="register", object_label="",
+                message="no name given",
+            )
+
+        frame = ctx.camera_getter()
+        if frame is None:
+            return InteractionResult(
+                success=False, action="register", object_label=name,
+                message="no camera frame",
+            )
+
+        success = self._store.register(name, frame)
+
+        # Personality: she learned something new — curious → satisfied
+        if success and ctx.personality:
+            from logic.personality import EmotionalState
+            ctx.personality._set_emotional_state(EmotionalState.SATISFIED)
+
+        if success and ctx.narration and ctx.personality:
+            if ctx.personality.should_speak(topic="register"):
+                await ctx.narration.speak(f"got it. {name}.")
+                ctx.personality.record_speech("register")
+
+        return InteractionResult(
+            success=success, action="register", object_label=name,
+            message=f"learned to recognize {name}" if success else "registration failed",
+        )
+
+
 class UndoProtocol(Protocol):
     """Reverse ALICE's last move — swap pick and place positions."""
 
@@ -574,12 +621,12 @@ class IgnoreProtocol(Protocol):
 
 # ── Factory ──────────────────────────────────────────────────────
 
-def build_registry(interaction, kinesthetic=None) -> ProtocolRegistry:
+def build_registry(interaction, custom_objects=None) -> ProtocolRegistry:
     """Build and populate a ProtocolRegistry from existing subsystem instances.
 
     Args:
         interaction: The shared ObjectInteraction instance.
-        kinesthetic: Optional KinestheticTeacher for the teach protocol.
+        custom_objects: Optional CustomObjectStore for the register protocol.
     """
     registry = ProtocolRegistry()
 
@@ -594,6 +641,8 @@ def build_registry(interaction, kinesthetic=None) -> ProtocolRegistry:
     registry.register(WakeScanProtocol())
     registry.register(TeachProtocol())
     registry.register(UndoProtocol(interaction))
+    if custom_objects is not None:
+        registry.register(RegisterProtocol(custom_objects))
     registry.register(IgnoreProtocol())
 
     logger.info(f"Protocol registry: {len(registry.names)} protocols registered")

@@ -121,6 +121,9 @@ class ObjectInteraction:
         # Last successful move — for undo
         self._last_move: Optional[Dict] = None  # {"pick": (x,y), "place": (x,y), "label": str}
 
+        # Custom object store — for objects YOLO can't recognize
+        self._custom_objects = None
+
     async def _pick_and_place(self, pick_px, place_px, label: str,
                               config=None) -> bool:
         """Run pick_and_place and record the move for undo."""
@@ -184,14 +187,31 @@ class ObjectInteraction:
 
         return None
 
+    def set_custom_objects(self, store) -> None:
+        """Attach the custom object store for registered objects."""
+        self._custom_objects = store
+
     def _find_object(self, label: str, frame) -> Optional[Tuple[int, int]]:
         """Run YOLO on a frame and find an object by label.
 
+        Falls back to custom object store if YOLO doesn't recognize it.
         Returns (center_x, center_y) in pixels, or None if not found.
         """
+        # Try YOLO first
         detections = self._detect_all(frame)
         det = self._match_label(label, detections)
-        return (det.center_x, det.center_y) if det else None
+        if det:
+            return (det.center_x, det.center_y)
+
+        # Fall back to custom registered objects
+        if self._custom_objects is not None and frame is not None:
+            match = self._custom_objects.find(label, frame)
+            if match:
+                cx, cy, conf = match
+                logger.debug(f"Custom object '{label}' found at ({cx}, {cy}) conf={conf:.2f}")
+                return (cx, cy)
+
+        return None
 
     async def fetch(
         self,
