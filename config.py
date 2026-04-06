@@ -119,7 +119,7 @@ class LLMInterpreterConfig:
     base_url: str = "http://localhost:11434"
     interval_s: float = 4.0
     timeout_s: float = 0.5
-    num_predict: int = 40
+    num_predict: int = 60
     temperature: float = 0.3
     min_modifier: float = 0.3
     max_modifier: float = 2.0
@@ -359,7 +359,7 @@ def _dict_to_config(data: dict) -> AliceConfig:
         base_url=li_data.get("base_url", "http://localhost:11434"),
         interval_s=li_data.get("interval_s", 4.0),
         timeout_s=li_data.get("timeout_s", 0.5),
-        num_predict=li_data.get("num_predict", 40),
+        num_predict=li_data.get("num_predict", 60),
         temperature=li_data.get("temperature", 0.3),
         min_modifier=li_data.get("min_modifier", 0.3),
         max_modifier=li_data.get("max_modifier", 2.0),

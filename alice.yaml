@@ -110,7 +110,7 @@ llm_interpreter:
   base_url: "http://localhost:11434"
   interval_s: 4.0              # seconds between LLM modulation queries
   timeout_s: 0.5               # max wait per query (defaults if exceeded)
-  num_predict: 40              # max output tokens
+  num_predict: 60              # max output tokens (full JSON needs ~54)
   temperature: 0.3             # low for consistent structured output
   min_modifier: 0.3            # floor for all modifiers
   max_modifier: 2.0            # ceiling for all modifiers

@@ -142,7 +142,7 @@ class LLMInterpreter:
         base_url: str = "http://localhost:11434",
         interval_s: float = 4.0,
         timeout_s: float = 0.5,
-        num_predict: int = 40,
+        num_predict: int = 60,
         temperature: float = 0.3,
         min_val: float = 0.3,
         max_val: float = 2.0,
