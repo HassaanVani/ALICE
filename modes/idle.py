@@ -49,6 +49,12 @@ class IdleRunner(ModeRunner):
         presence_det = self.ctx.presence_detector
         last_habit_snapshot: float = 0.0
 
+        # Peripheral awareness — front camera passively watches for gestures
+        from logic.peripheral_awareness import PeripheralAwareness
+        peripheral = PeripheralAwareness()
+        if hasattr(self.ctx, 'hand_detector') and self.ctx.hand_detector is not None:
+            peripheral.set_hand_detector(self.ctx.hand_detector)
+
         while self.ctx.running():
             # Update personality tick (mood decay, idle timer)
             if self.ctx.personality is not None:
@@ -88,6 +94,10 @@ class IdleRunner(ModeRunner):
                         "center_y": presence.face_center_y,
                         "distance_cm": presence.closest_distance,
                     })
+
+            # --- Peripheral awareness: front camera watches for gestures ---
+            if front_frame is not None:
+                peripheral.update(front_frame, presence)
 
                 # Update state for dashboard
                 if presence is not None:
@@ -198,6 +208,20 @@ class IdleRunner(ModeRunner):
                 await asyncio.sleep(self.ctx.config.timing.idle_loop_s)
                 continue
 
+            # --- Peripheral glance: sneaking a look at the user ---
+            # If peripheral vision caught something interesting, find a
+            # natural moment to sweep the arm camera toward the user.
+            # The glance is subtle — she extends her current motion slightly
+            # further, grabs a frame, then returns.
+            if peripheral.has_pending_glance and not bump_happened:
+                glance = peripheral.get_pending_glance()
+                if glance is not None:
+                    confirmed = await self._execute_glance(
+                        glance, peripheral, fist_bump,
+                    )
+                    if confirmed and body_lang is not None:
+                        body_lang._trigger("attentive")
+
             # Idle behaviors
             if behavior == "tetris" and not tetris_active:
                 # Drift to Tetris — she decided to play
@@ -282,6 +306,63 @@ class IdleRunner(ModeRunner):
             await self._stop_tetris(tetris_controller)
             if self.ctx.personality is not None:
                 self.ctx.personality.exit_flow_state()
+
+    async def _execute_glance(self, glance, peripheral, fist_bump) -> bool:
+        """The glance — ALICE sweeps her arm camera toward the user.
+
+        She doesn't snap to look at them. She extends her current motion
+        slightly further than needed, as if stretching or scanning a bit
+        wider, and the arm camera catches a frame of the user on the way
+        through. Then she returns to what she was doing.
+
+        If the glance confirms a fist bump, she responds directly.
+        """
+        from logic.peripheral_awareness import PeripheralEvent
+
+        if self.ctx.arm is None:
+            return False
+
+        # Save current position — she'll return here after the glance
+        current = self.ctx.arm.position.as_tuple()
+
+        # The glance: swing base rotation toward the user (roughly forward)
+        # and tilt slightly up — a natural "stretching" motion
+        glance_angles = (
+            current[0],                    # keep base where it is
+            current[1] + 5,                # lift shoulder slightly
+            current[2] - 3,                # extend elbow slightly
+            current[3],                    # keep wrist
+        )
+
+        # Move to glance position — smooth, not snappy
+        speed = 20  # slow, casual
+        self.ctx.arm.move_to(glance_angles, speed=speed)
+        await asyncio.sleep(0.4)
+
+        # Grab a frame from the arm camera — this is the actual look
+        arm_frame = self.ctx.cameras.get_frame(CameraRole.OVERHEAD)
+
+        # Check what we saw
+        confirmed_event = peripheral.execute_glance(glance, arm_frame)
+
+        # Return to previous position — smooth drift back
+        self.ctx.arm.move_to(current, speed=15)
+        await asyncio.sleep(0.3)
+
+        # If we confirmed a fist bump, respond
+        if confirmed_event == PeripheralEvent.FIST_OFFERED:
+            if arm_frame is not None:
+                await fist_bump.check_and_respond(
+                    arm_frame,
+                    arm=self.ctx.arm,
+                    dynamics=self.ctx.dynamics,
+                    personality=self.ctx.personality,
+                    narration=self.ctx.narration,
+                    state_manager=self.ctx.state_manager,
+                )
+            return True
+
+        return confirmed_event is not None
 
     def _try_start_tetris(self) -> Optional[object]:
         """Try to create a Tetris controller for idle play.
