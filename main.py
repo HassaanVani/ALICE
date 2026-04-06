@@ -285,6 +285,12 @@ class ALICE:
 
             self._ws_server.set_protocol_dispatch(_protocol_dispatch)
 
+            # Camera role swap from dashboard
+            def _swap_cameras():
+                return self.cameras.swap_roles(CameraRole.ARM_MOUNTED, CameraRole.FRONT_FACING)
+
+            self._ws_server.set_swap_cameras_callback(_swap_cameras)
+
             # Inject shared hardware into PuppetServer so it drives the same arm
             self.puppet_server.arm = self.arm
             self.puppet_server.magnet = self.magnet

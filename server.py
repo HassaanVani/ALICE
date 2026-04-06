@@ -64,6 +64,10 @@ class TensorStreamServer:
         """Set callback for protocol dispatch. Called with (protocol_name, params) -> InteractionResult."""
         self._protocol_dispatch = callback
 
+    def set_swap_cameras_callback(self, callback: Callable) -> None:
+        """Set callback for swapping camera roles from dashboard."""
+        self._swap_cameras_callback = callback
+
     async def register(self, websocket: ServerConnection) -> None:
         self.clients.add(websocket)
         self._client_queues[websocket] = asyncio.Queue(maxsize=self.MAX_CLIENT_QUEUE)
@@ -203,6 +207,14 @@ class TensorStreamServer:
                     asyncio.create_task(self._handle_protocol(
                         websocket, protocol_name, params,
                     ))
+
+            elif command == "swap_cameras":
+                if self._swap_cameras_callback:
+                    success = self._swap_cameras_callback()
+                    await websocket.send(json.dumps({
+                        "type": "cameras_swapped",
+                        "success": success,
+                    }))
 
         except json.JSONDecodeError as e:
             logger.debug(f"Malformed JSON from client: {e}")

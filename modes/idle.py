@@ -148,12 +148,13 @@ class IdleRunner(ModeRunner):
                 )
 
             # --- Fist bump (reactive + initiated) ---
+            # Uses the arm camera — ALICE sees the fist through her own eyes
             bump_happened = False
 
-            if front_frame is not None and not fist_bump.on_cooldown:
+            if frame is not None and not fist_bump.on_cooldown:
                 # Reactive: check if someone is offering a fist bump
                 bump_happened = await fist_bump.check_and_respond(
-                    front_frame,
+                    frame,
                     arm=self.ctx.arm,
                     dynamics=self.ctx.dynamics,
                     personality=self.ctx.personality,
@@ -175,9 +176,9 @@ class IdleRunner(ModeRunner):
                     personality=self.ctx.personality,
                     presence_info=presence,
                 ):
-                    front_getter = lambda: self.ctx.cameras.get_frame(CameraRole.FRONT_FACING)
+                    arm_getter = lambda: self.ctx.cameras.get_frame(CameraRole.OVERHEAD)
                     bump_happened = await fist_bump.initiate_bump(
-                        camera_getter=front_getter,
+                        camera_getter=arm_getter,
                         arm=self.ctx.arm,
                         dynamics=self.ctx.dynamics,
                         personality=self.ctx.personality,

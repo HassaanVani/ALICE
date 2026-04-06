@@ -271,6 +271,36 @@ class CameraManager:
         self._callbacks.clear()
         self._error_callbacks.clear()
 
+    def swap_roles(self, role_a: CameraRole, role_b: CameraRole) -> bool:
+        """Swap the feeds assigned to two camera roles.
+
+        This lets the user reassign which physical camera serves which role
+        without restarting. For example, swapping ARM_MOUNTED and FRONT_FACING
+        when the cameras are physically mounted differently than expected.
+
+        Returns True if the swap was performed.
+        """
+        feed_a = self._feeds.get(role_a)
+        feed_b = self._feeds.get(role_b)
+
+        if feed_a is None and feed_b is None:
+            return False
+
+        # Swap the feed entries in the dict
+        if feed_a is not None:
+            feed_a.config.role = role_b
+        if feed_b is not None:
+            feed_b.config.role = role_a
+
+        self._feeds[role_a] = feed_b
+        self._feeds[role_b] = feed_a
+
+        # Clean up None entries
+        self._feeds = {k: v for k, v in self._feeds.items() if v is not None}
+
+        logger.info(f"Camera roles swapped: {role_a.value} <-> {role_b.value}")
+        return True
+
     def get_resolution(self, role: CameraRole) -> Optional[Tuple[int, int]]:
         feed = self._feeds.get(role)
         if feed and feed.is_open:
