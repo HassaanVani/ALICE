@@ -4,9 +4,7 @@
 
 The first thing on your desk that knows what's on your desk.
 
-ALICE is a personal desk assistant — a robotic arm with computer vision, personality, and opinions. She sees real objects with YOLO, remembers where things belong across sessions, develops quirks from observing you, plays Tetris when she's bored, and communicates entirely through body language.
-
-Runs fully offline. No cloud APIs required.
+ALICE is a personal desk assistant — a robotic arm with computer vision, personality, and opinions. She sees real objects with YOLO, remembers where things belong across sessions, develops quirks from observing you, plays Tetris when she's bored, and communicates entirely through body language. Runs fully offline. No cloud APIs required.
 
 ## Architecture
 
