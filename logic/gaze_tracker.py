@@ -53,8 +53,8 @@ class GazeTracker:
     MAX_J1_FACE = 40.0   # degrees base rotation range for tracking
     MAX_J2_FACE = 15.0   # degrees shoulder range for vertical tracking
 
-    # Neutral "looking forward" position
-    NEUTRAL_ANGLES = (0.0, 10.0, 0.0, 0.0)
+    # Neutral "looking at user" position — calibrated on real hardware
+    NEUTRAL_ANGLES = (-33.0, -2.0, -72.0, 43.0)
 
     # Smoothing — lower = smoother/slower tracking
     DEFAULT_ALPHA = 0.06
@@ -181,7 +181,7 @@ class GazeTracker:
             if self._llm_interpreter is not None:
                 scan_amp *= self._llm_interpreter.modifiers.scn
                 scan_per *= self._llm_interpreter.modifiers.per
-            scan_j1 = scan_amp * math.sin(
+            scan_j1 = self.NEUTRAL_ANGLES[0] + scan_amp * math.sin(
                 2 * math.pi * self._scan_phase / scan_per
             )
             raw_target = (scan_j1, self.NEUTRAL_ANGLES[1],
@@ -212,19 +212,18 @@ class GazeTracker:
         dynamics.arm.move_to(target.angles, speed=15)
 
     def _pixel_to_gaze(self, px: float, py: float,
-                       frame_w: float = 1920, frame_h: float = 1080) -> Tuple[float, ...]:
-        """Rough mapping from overhead camera pixel coords to gaze angles.
+                       frame_w: float = 1280, frame_h: float = 720) -> Tuple[float, ...]:
+        """Rough mapping from camera pixel coords to gaze angles.
 
-        This is approximate — proper calibration would use the CalibrationManager.
-        But for "look at that object" it's good enough.
+        Offsets are relative to NEUTRAL_ANGLES (the calibrated default position).
         """
         norm_x = (px / frame_w) - 0.5
         norm_y = (py / frame_h) - 0.5
 
-        j1 = -norm_x * 2 * 50.0  # wider range for overhead camera
-        j2 = 10.0 - norm_y * 2 * 20.0
+        j1 = self.NEUTRAL_ANGLES[0] - norm_x * 2 * self.MAX_J1_FACE
+        j2 = self.NEUTRAL_ANGLES[1] - norm_y * 2 * self.MAX_J2_FACE
 
-        return (j1, j2, 0.0, 0.0)
+        return (j1, j2, self.NEUTRAL_ANGLES[2], self.NEUTRAL_ANGLES[3])
 
     def reset(self) -> None:
         """Reset to neutral gaze."""

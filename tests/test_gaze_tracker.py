@@ -83,9 +83,13 @@ class TestGazeTracker:
         # Second get — should be further toward target
         t2 = gaze.get_target()
 
-        # Both should be face targets but t2 should be closer to final
+        # Both should be face targets and t2 should be further from neutral than t1
+        # (i.e., smoothing is moving away from neutral toward the face target)
         assert t1.target_type == "face"
-        assert abs(t2.angles[0]) > abs(t1.angles[0]) or abs(t2.angles[0] - t1.angles[0]) < 1
+        neutral_j1 = GazeTracker.NEUTRAL_ANGLES[0]
+        dist_t1 = abs(t1.angles[0] - neutral_j1)
+        dist_t2 = abs(t2.angles[0] - neutral_j1)
+        assert dist_t2 >= dist_t1 or abs(dist_t2 - dist_t1) < 1
 
     def test_face_timeout(self):
         gaze = GazeTracker(alpha=1.0)

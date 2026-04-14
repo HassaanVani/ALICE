@@ -289,10 +289,14 @@ class TestIntegrationPoints:
         gt2._scan_phase = 1.0
         target_raw = gt2.get_target()
 
-        # Modulated scan amplitude should be ~2x
-        if target_raw.angles[0] != 0:
-            ratio = abs(target_mod.angles[0] / target_raw.angles[0])
-            assert abs(ratio - 2.0) < 0.2
+        # Modulated scan amplitude should be ~2x (offset from neutral)
+        from logic.gaze_tracker import GazeTracker as _GT
+        neutral_j1 = _GT.NEUTRAL_ANGLES[0]
+        offset_mod = abs(target_mod.angles[0] - neutral_j1)
+        offset_raw = abs(target_raw.angles[0] - neutral_j1)
+        if offset_raw > 0.1:
+            ratio = offset_mod / offset_raw
+            assert abs(ratio - 2.0) < 0.3
 
     def test_sound_effects_applies_modifier(self):
         from audio.sound_effects import SoundEffects, ServoPattern

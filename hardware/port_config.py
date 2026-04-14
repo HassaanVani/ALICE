@@ -6,9 +6,9 @@ from typing import Optional
 
 PLATFORM_DEFAULTS = {
     "darwin": {
-        "arm": "/dev/tty.usbmodem*",
-        "magnet": "/dev/tty.usbmodem*",
-        "imu": "/dev/tty.usbmodem*",
+        "arm": "/dev/tty.usbserial-*",
+        "magnet": "/dev/tty.usbserial-*",
+        "imu": "/dev/tty.usbserial-*",
     },
     "linux": {
         "arm": "/dev/ttyACM0",

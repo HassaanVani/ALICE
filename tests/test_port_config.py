@@ -33,7 +33,7 @@ class TestGetSerialPort:
         with patch("hardware.port_config.sys.platform", "darwin"):
             with patch("hardware.port_config.glob.glob", return_value=[]):
                 result = get_serial_port("arm")
-                assert result == "/dev/tty.usbmodem0"
+                assert result == "/dev/tty.usbserial-0"
 
     def test_glob_pattern_matches(self, monkeypatch):
         monkeypatch.delenv("ALICE_ARM_PORT", raising=False)

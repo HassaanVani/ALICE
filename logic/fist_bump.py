@@ -31,12 +31,13 @@ from typing import Callable, Optional, Tuple
 
 logger = logging.getLogger("FistBump")
 
-# Default arm angles for various bump positions
+# Calibrated bump positions for MyPalletizer 260
 # These are overridden by position-aware targeting when CV is active
-BUMP_CENTER = (90, 50, 110, 90)
-BUMP_LEFT = (120, 50, 110, 90)
-BUMP_RIGHT = (60, 50, 110, 90)
-RETRACT_ANGLES = (90, 80, 80, 90)
+BUMP_CENTER = (-33, 10, -72, 43)
+BUMP_LEFT = (-60, 10, -72, 43)
+BUMP_RIGHT = (-10, 10, -72, 43)
+RETRACT_ANGLES = (-33, -2, -72, 43)       # default "looking at user" position
+SLEEP_ANGLES = (-14, 38, -31, 36)         # resting/sleep position
 
 
 class FistBumpInteraction:
