@@ -68,6 +68,11 @@ class TensorStreamServer:
         """Set callback for swapping camera roles from dashboard."""
         self._swap_cameras_callback = callback
 
+    def set_arm_callbacks(self, status_cb: Callable, reconnect_cb: Callable) -> None:
+        """Set callbacks for arm connection status and reconnect from dashboard."""
+        self._arm_status_callback = status_cb
+        self._arm_reconnect_callback = reconnect_cb
+
     async def register(self, websocket: ServerConnection) -> None:
         self.clients.add(websocket)
         self._client_queues[websocket] = asyncio.Queue(maxsize=self.MAX_CLIENT_QUEUE)
@@ -213,6 +218,22 @@ class TensorStreamServer:
                     success = self._swap_cameras_callback()
                     await websocket.send(json.dumps({
                         "type": "cameras_swapped",
+                        "success": success,
+                    }))
+
+            elif command == "arm_status":
+                if self._arm_status_callback:
+                    status = self._arm_status_callback()
+                    await websocket.send(json.dumps({
+                        "type": "arm_status",
+                        **status,
+                    }))
+
+            elif command == "arm_reconnect":
+                if self._arm_reconnect_callback:
+                    success = self._arm_reconnect_callback()
+                    await websocket.send(json.dumps({
+                        "type": "arm_reconnect",
                         "success": success,
                     }))
 

@@ -46,7 +46,8 @@ class ArmController:
     RECONNECT_BASE_DELAY = 0.5
 
     def __init__(self, port: str = None, baudrate: int = 115200, simulate: bool = False,
-                 serial_lock: Optional[threading.Lock] = None):
+                 serial_lock: Optional[threading.Lock] = None,
+                 wifi_ip: Optional[str] = None, wifi_port: int = 9000):
         if port is None:
             from .port_config import get_serial_port
             port = get_serial_port("arm")
@@ -59,6 +60,9 @@ class ArmController:
         self._current_position = ArmPosition()
         self._target_position = ArmPosition()
         self._reconnect_attempts = 0
+        self._wifi_ip = wifi_ip
+        self._wifi_port = wifi_port
+        self._connection_type: Optional[str] = None  # "serial" or "wifi"
 
     @property
     def state(self) -> ArmState:
@@ -90,18 +94,54 @@ class ArmController:
             self._current_position = ArmPosition()
             return True
 
+        # Try serial first
         try:
             self._mc = MyPalletizer260(self.port, self.baudrate)
-            time.sleep(0.5)
-            self._state = ArmState.IDLE
-            self._current_position = ArmPosition()
-            self._reconnect_attempts = 0
-            logger.info(f"Connected on {self.port}")
-            return True
+            time.sleep(1)
+            # Verify the connection actually works
+            angles = self._mc.get_angles()
+            if angles != -1 and angles is not None:
+                self._state = ArmState.IDLE
+                self._current_position = ArmPosition()
+                self._reconnect_attempts = 0
+                self._connection_type = "serial"
+                logger.info(f"Connected via serial on {self.port}")
+                return True
+            else:
+                logger.warning(f"Serial port {self.port} opened but arm not responding")
+                try:
+                    self._mc.close() if hasattr(self._mc, 'close') else None
+                except Exception:
+                    pass
+                self._mc = None
         except Exception as e:
-            self._state = ArmState.ERROR
-            logger.error(f"Connection failed: {e}")
-            return False
+            logger.warning(f"Serial connection failed: {e}")
+            self._mc = None
+
+        # Fall back to WiFi if configured
+        if self._wifi_ip:
+            try:
+                from pymycobot.mypalletizersocket import MyPalletizerSocket
+                self._mc = MyPalletizerSocket(self._wifi_ip, self._wifi_port)
+                time.sleep(1)
+                angles = self._mc.get_angles()
+                if angles != -1 and angles is not None:
+                    self._state = ArmState.IDLE
+                    self._current_position = ArmPosition()
+                    self._reconnect_attempts = 0
+                    self._connection_type = "wifi"
+                    logger.info(f"Connected via WiFi on {self._wifi_ip}:{self._wifi_port}")
+                    return True
+                else:
+                    logger.warning("WiFi socket opened but arm not responding")
+                    self._mc = None
+            except Exception as e:
+                logger.warning(f"WiFi connection failed: {e}")
+                self._mc = None
+
+        self._state = ArmState.ERROR
+        logger.error("All connection methods failed")
+        return False
 
     def reconnect(self) -> bool:
         if self.simulate:

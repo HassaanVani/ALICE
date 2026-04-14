@@ -29,6 +29,8 @@ class CameraExtrinsicsConfig:
 class HardwareConfig:
     arm_port: Optional[str] = None
     arm_baudrate: int = 115200
+    arm_wifi_ip: Optional[str] = None
+    arm_wifi_port: int = 9000
     magnet_port: Optional[str] = None
     magnet_pin: int = 13
     imu_port: Optional[str] = None
@@ -248,6 +250,8 @@ def _dict_to_config(data: dict) -> AliceConfig:
     hardware = HardwareConfig(
         arm_port=hw_data.get("arm", {}).get("port"),
         arm_baudrate=hw_data.get("arm", {}).get("baudrate", 115200),
+        arm_wifi_ip=hw_data.get("arm", {}).get("wifi_ip"),
+        arm_wifi_port=hw_data.get("arm", {}).get("wifi_port", 9000),
         magnet_port=hw_data.get("magnet", {}).get("port"),
         magnet_pin=hw_data.get("magnet", {}).get("pin", 13),
         imu_port=hw_data.get("imu", {}).get("port"),

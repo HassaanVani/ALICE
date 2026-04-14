@@ -122,6 +122,9 @@ class ALICE:
             magnet_kwargs = {"simulate": self.simulate, "serial_lock": serial_lock}
             if hw.arm_port:
                 arm_kwargs["port"] = hw.arm_port
+            if hw.arm_wifi_ip:
+                arm_kwargs["wifi_ip"] = hw.arm_wifi_ip
+                arm_kwargs["wifi_port"] = hw.arm_wifi_port
             if hw.magnet_port:
                 magnet_kwargs["port"] = hw.magnet_port
 
@@ -299,6 +302,21 @@ class ALICE:
 
             # Wire tensor server for activation forwarding to dashboard
             self.puppet_server.set_tensor_server(self._ws_server)
+
+            # Arm connection status + reconnect from dashboard
+            def _arm_status():
+                return {
+                    "connected": self.arm.is_connected,
+                    "state": self.arm.state.value,
+                    "connection_type": getattr(self.arm, '_connection_type', None),
+                    "port": self.arm.port,
+                }
+
+            def _arm_reconnect():
+                self.arm.disconnect()
+                return self.arm.connect()
+
+            self._ws_server.set_arm_callbacks(_arm_status, _arm_reconnect)
 
             # --- Living behaviors ---
             if self.config.living_behaviors.enabled:

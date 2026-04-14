@@ -8,6 +8,8 @@ hardware:
   arm:
     port: null           # auto-detect if null
     baudrate: 115200
+    wifi_ip: null        # e.g. "192.168.1.87" — fallback if serial fails
+    wifi_port: 9000
   magnet:
     port: null
     pin: 13
