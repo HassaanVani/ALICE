@@ -18,8 +18,7 @@ from logic import TetrisAgent, PersonalityEngine, ActionOrigin
 from hardware.dynamics import MovementDynamics
 from server import TensorStreamServer
 from modes import (ModeContext, DemoState, IdleRunner,
-                   AutoTetrisRunner, CalibrateRunner, PuppeteerRunner,
-                   PerformanceRunner)
+                   AutoTetrisRunner, PuppeteerRunner)
 from puppet_server import PuppetServer
 from narration import NarrationService
 from voice_input import VoiceInputService
@@ -35,9 +34,7 @@ STATE_WEIGHTS_PATH = Path(__file__).parent / "brain" / "weights" / "block_state.
 class Mode(Enum):
     IDLE = "idle"
     AUTO_TETRIS = "auto_tetris"
-    CALIBRATE = "calibrate"
     PUPPETEER = "puppeteer"
-    PERFORMANCE = "performance"
 
 
 class ALICE:
@@ -527,9 +524,7 @@ class ALICE:
     _MODE_RUNNERS = {
         Mode.IDLE: IdleRunner,
         Mode.AUTO_TETRIS: AutoTetrisRunner,
-        Mode.CALIBRATE: CalibrateRunner,
         Mode.PUPPETEER: PuppeteerRunner,
-        Mode.PERFORMANCE: PerformanceRunner,
     }
 
     def _build_context(self) -> ModeContext:
@@ -646,7 +641,7 @@ class ALICE:
 async def main():
     parser = argparse.ArgumentParser(description="A.L.I.C.E. - Adaptive Learning Interface for Cognitive Exploration")
     parser.add_argument("--config", type=str, default=None, help="Path to alice.yaml config file")
-    parser.add_argument("--mode", type=str, choices=["idle", "auto_tetris", "calibrate", "puppeteer", "performance"], default=None)
+    parser.add_argument("--mode", type=str, choices=["idle", "auto_tetris", "puppeteer"], default=None)
     parser.add_argument("--simulate", action="store_true", default=None)
     parser.add_argument("--ws-port", type=int, default=None)
     parser.add_argument("--arm-port", type=str, default=None, help="Serial port for arm controller")

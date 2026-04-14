@@ -68,9 +68,9 @@ class TestEnvOverrides:
         from pathlib import Path
         cfg = load_config(
             yaml_path=Path("/nonexistent_alice_test.yaml"),
-            cli_overrides={"mode": "calibrate"},
+            cli_overrides={"mode": "puppeteer"},
         )
-        assert cfg.mode == "calibrate"
+        assert cfg.mode == "puppeteer"
 
 
 class TestDictToConfig:

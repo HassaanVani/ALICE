@@ -12,7 +12,7 @@ except ImportError:
     ServerConnection = object
 
 from brain import InferencePipeline
-from modes import DEMO_VISIBLE_MODES
+from modes import UI_SWITCHABLE_MODES
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -304,7 +304,7 @@ class TensorStreamServer:
         """Return state_sync JSON with available_modes filtered for demos."""
         raw = self._state_manager.get_state_sync_message()
         msg = json.loads(raw)
-        msg["available_modes"] = list(DEMO_VISIBLE_MODES)
+        msg["available_modes"] = list(UI_SWITCHABLE_MODES)
         return json.dumps(msg)
 
     async def _client_sender(self, websocket: ServerConnection) -> None:

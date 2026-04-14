@@ -1,4 +1,4 @@
-"""Tests for modes/performance.py, logic/tea_choreography.py, logic/fist_bump.py, logic/teaching.py."""
+"""Tests for logic/tea_choreography.py, logic/fist_bump.py, logic/teaching.py."""
 
 import asyncio
 from unittest.mock import MagicMock, AsyncMock, PropertyMock
@@ -55,17 +55,10 @@ class TestTeaChoreography:
         assert safe[0] < 200  # cup should be away from laptop
 
 
-# --- Performance Mode (basic import test) ---
 
-class TestPerformanceMode:
-    def test_import(self):
-        from modes.performance import PerformanceRunner
-        assert PerformanceRunner is not None
+# --- Mode registry (basic check) ---
 
-    def test_mode_registered(self):
-        from modes import DEMO_VISIBLE_MODES
-        assert "performance" in DEMO_VISIBLE_MODES
-
-    def test_mode_enum(self):
-        from main import Mode
-        assert Mode.PERFORMANCE.value == "performance"
+class TestModeRegistry:
+    def test_idle_in_switchable_modes(self):
+        from modes import UI_SWITCHABLE_MODES
+        assert "idle" in UI_SWITCHABLE_MODES

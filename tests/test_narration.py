@@ -89,7 +89,7 @@ class TestNarrationFallback:
 
     def test_fallback_all_modes_silence(self):
         """ALICE speaks through body language — fallback is silence for all modes."""
-        for mode in ["idle", "performance", "puppeteer", "calibrate", "auto_tetris"]:
+        for mode in ["idle", "puppeteer", "auto_tetris"]:
             service = NarrationService(enabled=True)
             sm = MagicMock()
             state = MagicMock()
