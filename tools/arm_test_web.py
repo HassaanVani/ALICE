@@ -34,6 +34,7 @@ hand_tracking_thread = None
 
 # Tracking sensitivity (adjustable from UI)
 tracking_v_sensitivity = 1.0  # vertical multiplier
+face_tracking_arm_only = False
 
 # Wander mode
 wandering = False
@@ -144,13 +145,17 @@ def _cam_reader_loop():
                     _cam_frame = frame
         except Exception:
             break
-        time.sleep(0.025)  # ~40fps read rate
+        time.sleep(0.030)  # ~33fps read rate — leave headroom for tracking threads
 
 
 def get_cam_frame():
-    """Thread-safe: get the latest camera frame."""
+    """Thread-safe: return a copy of the latest camera frame.
+
+    Returns a copy so that consumers (face detection, video feed) don't
+    hold a reference to the same numpy array the reader thread is writing to.
+    """
     with _cam_frame_lock:
-        return _cam_frame
+        return _cam_frame.copy() if _cam_frame is not None else None
 
 
 def stop_webcam():
@@ -204,12 +209,12 @@ def _cam2_reader_loop():
                     _cam2_frame = frame
         except Exception:
             break
-        time.sleep(0.025)
+        time.sleep(0.030)
 
 
 def get_cam2_frame():
     with _cam2_frame_lock:
-        return _cam2_frame
+        return _cam2_frame.copy() if _cam2_frame is not None else None
 
 
 def stop_webcam2():
@@ -231,12 +236,13 @@ def stop_webcam2():
 # ── Face Tracking ────────────────────────────────────────────────
 
 def _face_tracking_loop():
-    """Dual-camera face tracking.
+    """Arm-camera-primary face tracking.
 
-    Primary (front camera, stable): coarse position — where is the user?
-    Secondary (arm camera): refinement — is the face centered in ALICE's view?
+    The arm-mounted camera is ALICE's actual perspective — it drives tracking.
+    The front camera provides an optional coarse hint when available (wider FOV,
+    stable mount) to help the arm camera find the face faster.
 
-    Primary drives. Secondary adjusts. If only one is running, it's used alone.
+    Sensitivity slider scales all axes (horizontal + vertical).
     """
     import cv2
     import mediapipe as mp
@@ -253,20 +259,36 @@ def _face_tracking_loop():
     )
     detector = FaceDetector.create_from_options(options)
 
-    COARSE_SMOOTH = 0.20
-    FINE_SMOOTH = 0.08
-    DEAD_ZONE = 0.02
-    J1_RANGE = 60.0
+    # Base smoothing factors (at sensitivity = 1.0)
+    ARM_SMOOTH_BASE = 0.35
+    HINT_SMOOTH_BASE = 0.15
+
+    # Arm camera drives with full range — J1 covers most of the ±162° hardware limit
+    J1_RANGE = 140.0
     J2_RANGE = 15.0
     J3_RANGE = 20.0
     J4_RANGE = 25.0
-    REFINE_J1 = 8.0
-    REFINE_J4 = 5.0
+
+    # Front camera hint — nudges toward the user when arm cam loses the face
+    HINT_J1 = 15.0
+    HINT_J4 = 8.0
+
+    # Velocity damping — suppresses oscillation from the arm-camera feedback loop.
+    # When the arm moves, the face shifts in the camera, creating a new error in
+    # the opposite direction. Without damping, high sensitivity amplifies this
+    # loop and the arm rings back and forth.
+    VELOCITY_DAMP = 0.6      # 0 = no damping, 1 = full velocity subtracted
+    DEAD_ZONE_BASE = 0.015   # base dead zone in normalized face-offset units
 
     current_j1 = float(DEFAULT_ANGLES[0])
     current_j2 = float(DEFAULT_ANGLES[1])
     current_j3 = float(DEFAULT_ANGLES[2])
     current_j4 = float(DEFAULT_ANGLES[3])
+    # Velocity tracking for damping
+    prev_j1 = current_j1
+    prev_j2 = current_j2
+    prev_j3 = current_j3
+    prev_j4 = current_j4
     last_send = 0
     guard = ResistanceGuard()
 
@@ -275,6 +297,7 @@ def _face_tracking_loop():
     fist_frames = 0
     FIST_CONFIRM_FRAMES = 3  # fast detection — 3 frames (~100ms)
     bump_cooldown = 0.0
+    track_iter = 0  # iteration counter for throttling fist bump detection
 
     def detect_face(frame):
         if frame is None:
@@ -291,6 +314,26 @@ def _face_tracking_loop():
         cy = (bbox.origin_y + bbox.height / 2) / h - 0.5
         return cx, cy
 
+    def damped_step(current, target, prev, smooth, sens):
+        """Move toward target with velocity damping to prevent oscillation.
+
+        At high sensitivity the arm-camera feedback loop amplifies errors.
+        We counteract this by:
+        1. Scaling smoothing inversely with sqrt(sensitivity) — higher gain
+           means gentler approach.
+        2. Subtracting a fraction of the current velocity from the step.
+           If the arm is already moving toward the target, this slows it
+           down as it converges (preventing overshoot). If it reversed
+           direction (oscillating), the velocity term opposes the reversal.
+        """
+        # Adaptive smoothing: compensate for feedback loop gain
+        adapted = smooth / max(1.0, sens ** 0.5)
+        error = target - current
+        velocity = current - prev  # how much we moved last frame
+        # Damped step: approach target but subtract momentum
+        step = adapted * error - VELOCITY_DAMP * velocity
+        return current + step
+
     global face_tracking
     while face_tracking:
         if mc is None:
@@ -301,61 +344,78 @@ def _face_tracking_loop():
             continue
 
         now = time.time()
-        v_sens = tracking_v_sensitivity
+        sens = tracking_v_sensitivity  # scales all axes
 
-        # Detect on both cameras
-        coarse_x, coarse_y = detect_face(get_cam_frame() if _cam_running else None)
-        fine_x, fine_y = detect_face(get_cam2_frame() if _cam2_running else None)
+        # Dead zone scales with sensitivity — filters micro-jitter at high gain
+        dead = DEAD_ZONE_BASE * max(1.0, sens * 0.5)
 
-        has_coarse = coarse_x is not None
-        has_fine = fine_x is not None
+        # Arm camera is primary (ALICE's perspective)
+        arm_x, arm_y = detect_face(get_cam2_frame() if _cam2_running else None)
+        # Front camera is optional coarse hint
+        if face_tracking_arm_only:
+            hint_x, hint_y = None, None
+        else:
+            hint_x, hint_y = detect_face(get_cam_frame() if _cam_running else None)
 
-        if has_coarse:
-            # Primary drives all joints
-            target_j1 = DEFAULT_ANGLES[0] - coarse_x * J1_RANGE
-            target_j2 = DEFAULT_ANGLES[1] - coarse_y * J2_RANGE * v_sens
-            target_j3 = DEFAULT_ANGLES[2] + coarse_y * J3_RANGE * v_sens
-            target_j4 = DEFAULT_ANGLES[3] + coarse_y * J4_RANGE * v_sens
+        has_arm = arm_x is not None
+        has_hint = hint_x is not None
 
-            # Secondary refines J1 and J4 to center face in arm cam
-            if has_fine:
-                target_j1 -= fine_x * REFINE_J1
-                target_j4 += fine_y * REFINE_J4
+        if has_arm:
+            # Apply dead zone — ignore tiny face offsets to prevent jitter
+            if abs(arm_x) < dead:
+                arm_x = 0.0
+            if abs(arm_y) < dead:
+                arm_y = 0.0
 
-            target_j1 = max(-162, min(162, target_j1))
-            target_j2 = max(-2, min(90, target_j2))
-            target_j3 = max(-92, min(60, target_j3))
-            target_j4 = max(-180, min(180, target_j4))
+            # Arm camera drives — face offset in ALICE's own view maps to joints
+            target_j1 = DEFAULT_ANGLES[0] - arm_x * J1_RANGE * sens
+            target_j2 = DEFAULT_ANGLES[1] - arm_y * J2_RANGE * sens
+            target_j3 = DEFAULT_ANGLES[2] + arm_y * J3_RANGE * sens
+            target_j4 = DEFAULT_ANGLES[3] + arm_y * J4_RANGE * sens
 
-            smooth = COARSE_SMOOTH
-            current_j1 += smooth * (target_j1 - current_j1)
-            current_j2 += smooth * (target_j2 - current_j2)
-            current_j3 += smooth * (target_j3 - current_j3)
-            current_j4 += smooth * (target_j4 - current_j4)
-
-        elif has_fine:
-            # Secondary only — half range, extra smooth to reduce jitter
-            target_j1 = DEFAULT_ANGLES[0] - fine_x * J1_RANGE * 0.4
-            target_j2 = DEFAULT_ANGLES[1] - fine_y * J2_RANGE * v_sens * 0.4
-            target_j3 = DEFAULT_ANGLES[2] + fine_y * J3_RANGE * v_sens * 0.4
-            target_j4 = DEFAULT_ANGLES[3] + fine_y * J4_RANGE * v_sens * 0.4
+            # Front camera hint: if also available, blend a small correction
+            if has_hint:
+                target_j1 -= hint_x * HINT_J1 * sens
+                target_j4 += hint_y * HINT_J4 * sens
 
             target_j1 = max(-162, min(162, target_j1))
             target_j2 = max(-2, min(90, target_j2))
             target_j3 = max(-92, min(60, target_j3))
             target_j4 = max(-180, min(180, target_j4))
 
-            current_j1 += FINE_SMOOTH * (target_j1 - current_j1)
-            current_j2 += FINE_SMOOTH * (target_j2 - current_j2)
-            current_j3 += FINE_SMOOTH * (target_j3 - current_j3)
-            current_j4 += FINE_SMOOTH * (target_j4 - current_j4)
+            # Save previous positions for velocity calculation
+            prev_j1, prev_j2, prev_j3, prev_j4 = current_j1, current_j2, current_j3, current_j4
+
+            current_j1 = damped_step(current_j1, target_j1, prev_j1, ARM_SMOOTH_BASE, sens)
+            current_j2 = damped_step(current_j2, target_j2, prev_j2, ARM_SMOOTH_BASE, sens)
+            current_j3 = damped_step(current_j3, target_j3, prev_j3, ARM_SMOOTH_BASE, sens)
+            current_j4 = damped_step(current_j4, target_j4, prev_j4, ARM_SMOOTH_BASE, sens)
+
+        elif has_hint:
+            # Arm camera lost the face — use front camera to steer toward user
+            target_j1 = DEFAULT_ANGLES[0] - hint_x * J1_RANGE * sens
+            target_j2 = DEFAULT_ANGLES[1] - hint_y * J2_RANGE * sens
+            target_j3 = DEFAULT_ANGLES[2] + hint_y * J3_RANGE * sens
+            target_j4 = DEFAULT_ANGLES[3] + hint_y * J4_RANGE * sens
+
+            target_j1 = max(-162, min(162, target_j1))
+            target_j2 = max(-2, min(90, target_j2))
+            target_j3 = max(-92, min(60, target_j3))
+            target_j4 = max(-180, min(180, target_j4))
+
+            prev_j1, prev_j2, prev_j3, prev_j4 = current_j1, current_j2, current_j3, current_j4
+
+            current_j1 = damped_step(current_j1, target_j1, prev_j1, HINT_SMOOTH_BASE, sens)
+            current_j2 = damped_step(current_j2, target_j2, prev_j2, HINT_SMOOTH_BASE, sens)
+            current_j3 = damped_step(current_j3, target_j3, prev_j3, HINT_SMOOTH_BASE, sens)
+            current_j4 = damped_step(current_j4, target_j4, prev_j4, HINT_SMOOTH_BASE, sens)
         else:
             time.sleep(0.05)
             continue
 
-        # ── Fist bump detection (both cameras) ──
-        if now - bump_cooldown > 4.0:  # 4s cooldown between bumps
-            # Check both cameras for a fist — lightweight check every few frames
+        # ── Fist bump detection — only every 5th iteration to save CPU ──
+        track_iter += 1
+        if track_iter % 5 == 0 and now - bump_cooldown > 4.0:
             if hand_detector is None:
                 import mediapipe as _mp
                 _BO = _mp.tasks.BaseOptions
@@ -369,7 +429,6 @@ def _face_tracking_loop():
                 )
                 hand_detector = _HL.create_from_options(_opts)
 
-            # Front camera detects fists — it has the stable wide view
             fist_found = False
             front = get_cam_frame() if _cam_running else get_cam2_frame()
             if front is not None:
@@ -413,7 +472,9 @@ def _face_tracking_loop():
             except Exception:
                 pass
 
-        time.sleep(0.033)
+        # Yield CPU to camera reader threads — 66ms gives ~15fps tracking
+        # which is plenty for smooth arm movement while keeping feeds alive
+        time.sleep(0.066)
 
     detector.close()
     if hand_detector:
@@ -1202,8 +1263,8 @@ def video_feed2():
 def api_face_tracking_start():
     if mc is None:
         return jsonify({"error": "arm not connected"})
-    if cam is None or not cam.isOpened():
-        return jsonify({"error": "webcam not started"})
+    if not _cam_running and not _cam2_running:
+        return jsonify({"error": "start at least one camera first"})
     start_face_tracking()
     return jsonify({"ok": True})
 
@@ -1223,8 +1284,8 @@ def api_face_tracking_status():
 def api_hand_tracking_start():
     if mc is None:
         return jsonify({"error": "arm not connected"})
-    if not _cam_running:
-        return jsonify({"error": "webcam not started"})
+    if not _cam_running and not _cam2_running:
+        return jsonify({"error": "start at least one camera first"})
     stop_face_tracking()  # can't run both at once
     start_hand_tracking()
     return jsonify({"ok": True})
@@ -1248,6 +1309,14 @@ def api_wander_start():
 def api_wander_stop():
     stop_wander()
     return jsonify({"ok": True})
+
+
+@app.route("/api/tracking/arm_only", methods=["POST"])
+def api_tracking_arm_only():
+    global face_tracking_arm_only
+    data = request.json or {}
+    face_tracking_arm_only = bool(data.get("arm_only", False))
+    return jsonify({"ok": True, "arm_only": face_tracking_arm_only})
 
 
 @app.route("/api/tracking/sensitivity", methods=["POST"])
@@ -1428,10 +1497,7 @@ HTML = """<!DOCTYPE html>
   <div class="panel">
     <h2>Webcam</h2>
     <div class="cam-controls">
-      <select id="camDevice"><option value="0">Camera 0</option></select>
-      <button class="btn small green" onclick="startCam()">Start</button>
-      <button class="btn small" onclick="stopCam()">Stop</button>
-      <button class="btn small" onclick="scanCams()">Scan</button>
+      <button class="btn small" onclick="scanCams()">Scan Devices</button>
     </div>
     <div class="cam-controls">
       <button class="btn small primary" id="faceTrackBtn" onclick="toggleFaceTrack()">Face Track: OFF</button>
@@ -1440,32 +1506,40 @@ HTML = """<!DOCTYPE html>
       <span id="trackStatus" style="font-size:11px;color:#555;">Requires cam + arm</span>
     </div>
     <div class="cam-controls">
-      <span style="font-size:11px;color:#8888bb;">V-Sensitivity:</span>
+      <span style="font-size:11px;color:#8888bb;">Sensitivity:</span>
       <input type="range" id="vSensSlider" min="50" max="500" value="100" style="width:120px" oninput="setVSens(this.value)">
       <span id="vSensVal" style="font-size:11px;color:#e94560;">1.0x</span>
     </div>
+    <div class="cam-controls">
+      <label style="font-size:11px;color:#8888bb;display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="checkbox" id="armOnlyCheck" onchange="toggleArmOnly(this.checked)">
+        Face track with Arm Camera ONLY
+      </label>
+    </div>
     <div style="display:flex;gap:8px;">
       <div style="flex:1;">
-        <div style="font-size:10px;color:#555;margin-bottom:4px;">Primary (front)</div>
+        <div style="font-size:10px;color:#555;margin-bottom:4px;">Front Camera</div>
+        <div class="cam-controls">
+          <select id="camDevice" style="flex:1;"><option value="0">Camera 0</option></select>
+          <button class="btn small green" onclick="startCam()">Start</button>
+          <button class="btn small" onclick="stopCam()">Stop</button>
+        </div>
         <img id="camFeed" class="cam-feed" src="" style="display:none;width:100%">
         <div id="camPlaceholder" class="cam-feed" style="display:flex;align-items:center;justify-content:center;color:#333;font-size:11px;min-height:150px;">
           No feed
         </div>
       </div>
       <div style="flex:1;">
-        <div style="font-size:10px;color:#555;margin-bottom:4px;">Secondary (arm)</div>
+        <div style="font-size:10px;color:#555;margin-bottom:4px;">Arm Camera</div>
+        <div class="cam-controls">
+          <select id="cam2Device" style="flex:1;"><option value="0">Camera 0</option></select>
+          <button class="btn small green" onclick="startCam2()">Start</button>
+          <button class="btn small" onclick="stopCam2()">Stop</button>
+        </div>
         <img id="cam2Feed" class="cam-feed" src="" style="display:none;width:100%">
         <div id="cam2Placeholder" class="cam-feed" style="display:flex;align-items:center;justify-content:center;color:#333;font-size:11px;min-height:150px;">
           No feed
         </div>
-      </div>
-    </div>
-    <div style="margin-top:10px;border-top:1px solid #1a1a3a;padding-top:10px;">
-      <div class="cam-controls">
-        <span style="font-size:11px;color:#8888bb;">Secondary (arm cam):</span>
-        <button class="btn small green" onclick="startCam2()">Start</button>
-        <button class="btn small" onclick="stopCam2()">Stop</button>
-        <span id="cam2Status" style="font-size:11px;color:#555;">Off</span>
       </div>
     </div>
   </div>
@@ -1695,14 +1769,16 @@ function updateStatus(d) {
 // Webcam
 function scanCams() {
   fetch("/api/webcam/devices").then(r=>r.json()).then(d => {
-    const sel = document.getElementById("camDevice");
-    sel.innerHTML = "";
-    d.devices.forEach(c => {
-      sel.innerHTML += `<option value="${c.id}">${c.name} (${c.id})</option>`;
+    ["camDevice", "cam2Device"].forEach(selId => {
+      const sel = document.getElementById(selId);
+      sel.innerHTML = "";
+      d.devices.forEach(c => {
+        sel.innerHTML += `<option value="${c.id}">${c.name} (${c.id})</option>`;
+      });
+      if (d.devices.length === 0) {
+        sel.innerHTML = "<option>No cameras</option>";
+      }
     });
-    if (d.devices.length === 0) {
-      sel.innerHTML = "<option>No cameras</option>";
-    }
   });
 }
 
@@ -1727,26 +1803,21 @@ function stopCam() {
 }
 
 function startCam2() {
-  // Just request — server will pick whichever device isn't primary
-  fetch("/api/webcam2/start", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({device_id:0})})
+  const dev = parseInt(document.getElementById("cam2Device").value) || 0;
+  fetch("/api/webcam2/start", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({device_id:dev})})
     .then(r=>r.json()).then(d => {
       if (d.ok) {
-        document.getElementById("cam2Status").textContent = "Running";
-        document.getElementById("cam2Status").style.color = "#50fa7b";
         document.getElementById("cam2Feed").src = "/video_feed2?" + Date.now();
         document.getElementById("cam2Feed").style.display = "block";
         document.getElementById("cam2Placeholder").style.display = "none";
       } else {
-        document.getElementById("cam2Status").textContent = d.error || "Failed";
-        document.getElementById("cam2Status").style.color = "#e94560";
+        document.getElementById("cam2Placeholder").textContent = d.error || "Failed";
       }
     });
 }
 
 function stopCam2() {
   fetch("/api/webcam2/stop", {method:"POST"});
-  document.getElementById("cam2Status").textContent = "Off";
-  document.getElementById("cam2Status").style.color = "#555";
   document.getElementById("cam2Feed").style.display = "none";
   document.getElementById("cam2Placeholder").style.display = "flex";
 }
@@ -1842,6 +1913,10 @@ function setVSens(val) {
   const v = parseInt(val) / 100;
   document.getElementById("vSensVal").textContent = v.toFixed(1) + "x";
   fetch("/api/tracking/sensitivity", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({vertical:v})});
+}
+
+function toggleArmOnly(checked) {
+  fetch("/api/tracking/arm_only", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({arm_only:checked})});
 }
 
 function doDance() { fetch("/api/dance", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({speed:parseInt(document.getElementById("speedSlider").value)})}); setReadout("Dancing..."); }
