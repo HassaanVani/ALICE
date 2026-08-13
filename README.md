@@ -1,4 +1,4 @@
-# ALICE
+# ALICE -- Adaptive Local Interface for Cohabitant Euthenics
 
 ## Project description
 
