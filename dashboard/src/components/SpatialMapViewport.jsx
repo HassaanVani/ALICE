@@ -78,9 +78,9 @@ export default function SpatialMapViewport({ state = {} }) {
       });
     } else {
       list.push(
-        { id: 'demo_1', label: 'Pen Holder', category: 'stationery', confidence: 0.94, x: -14, z: -6, height: 7.0, status: 'scanned' },
-        { id: 'demo_2', label: 'Mug', category: 'drinkware', confidence: 0.98, x: 12, z: 4, height: 8.5, status: 'scanned' },
-        { id: 'demo_3', label: 'Keyboard Area', category: 'peripheral', confidence: 0.91, x: 0, z: -10, height: 1.8, status: 'active' }
+        { id: 'demo_1', label: 'Pen Holder', category: 'stationery', confidence: 0.94, x: -10, z: 4, height: 7.0, status: 'scanned' },
+        { id: 'demo_2', label: 'Center Desk Mug', category: 'drinkware', confidence: 0.98, x: 6, z: -2, height: 8.5, status: 'scanned' },
+        { id: 'demo_3', label: 'Right Work Area', category: 'peripheral', confidence: 0.91, x: 20, z: 6, height: 2.2, status: 'active' }
       );
     }
     return list;
@@ -134,7 +134,7 @@ export default function SpatialMapViewport({ state = {} }) {
     const frameMat = new THREE.LineBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.6 });
     scene.add(new THREE.Line(frameGeo, frameMat));
 
-    // Robot arm mounting pedestal at (0, 0, -18)
+    // Robot arm mounting pedestal at far-left desk edge (-24, 0.6, -8)
     const baseGeo = new THREE.CylinderGeometry(4.0, 4.5, 1.2, 32);
     const baseMat = new THREE.MeshStandardMaterial({
       color: 0x15202e,
@@ -142,14 +142,14 @@ export default function SpatialMapViewport({ state = {} }) {
       metalness: 0.8,
     });
     const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-    baseMesh.position.set(0, 0.6, -18);
+    baseMesh.position.set(-24, 0.6, -8);
     scene.add(baseMesh);
 
     const ringGeo = new THREE.RingGeometry(4.6, 5.0, 32);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
     const ringMesh = new THREE.Mesh(ringGeo, ringMat);
     ringMesh.rotation.x = Math.PI / 2;
-    ringMesh.position.set(0, 0.05, -18);
+    ringMesh.position.set(-24, 0.05, -8);
     scene.add(ringMesh);
 
     // 2. Dense 3D Surface Heatmap
@@ -203,9 +203,9 @@ export default function SpatialMapViewport({ state = {} }) {
     scene.add(particles);
     particlesRef.current = { points: particles, positions: particlePositions, colors: particleColors };
 
-    // 3. Holographic Gaze Cone
-    const coneGeo = new THREE.ConeGeometry(5.5, 18, 16, 1, true);
-    coneGeo.translate(0, -9, 0);
+    // 3. Holographic Gaze Cone (Angled from far left across desk to the right)
+    const coneGeo = new THREE.ConeGeometry(7.0, 22, 16, 1, true);
+    coneGeo.translate(0, -11, 0);
     const coneMat = new THREE.MeshBasicMaterial({
       color: 0x00f0ff,
       transparent: true,
@@ -214,7 +214,9 @@ export default function SpatialMapViewport({ state = {} }) {
       side: THREE.DoubleSide,
     });
     const gazeCone = new THREE.Mesh(coneGeo, coneMat);
-    gazeCone.position.set(0, 18, -12);
+    gazeCone.position.set(-20, 16, -6);
+    gazeCone.rotation.z = -0.55; // Angle rightward across desk
+    gazeCone.rotation.x = 0.25;
     scene.add(gazeCone);
     gazeConeRef.current = gazeCone;
 
@@ -516,7 +518,7 @@ export default function SpatialMapViewport({ state = {} }) {
               display: 'inline-block',
             }}
           />
-          3D SPATIAL MAP · {trackedObjects.length} OBJECTS
+          3D SPATIAL MAP · {trackedObjects.length} OBJECTS · FAR-LEFT CALIBRATED
         </div>
       </div>
 
