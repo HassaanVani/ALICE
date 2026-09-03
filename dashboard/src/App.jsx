@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import BrainViewport from './components/BrainViewport.jsx';
+import SpatialMapViewport from './components/SpatialMapViewport.jsx';
 import SimulatedArm from './components/SimulatedArm/SimulatedArm.jsx';
 import CameraPanel from './components/CameraPanel.jsx';
 import PuppeteerView from './components/PuppeteerView.jsx';
@@ -240,8 +241,9 @@ function Timeline({ currentAct }) {
 
 function Dashboard({ entering }) {
   const { state, connected } = useAliceState();
-  const activations = useTensorStream();
+  const { activations } = useTensorStream();
   const { frameRef, cameraConnected } = useCameraStream();
+  const [centerView, setCenterView] = useState('spatial');
 
   const mode = state.mode || 'idle';
   const isPerformance = mode === 'performance';
@@ -296,14 +298,67 @@ function Dashboard({ entering }) {
             </div>
           </div>
 
-          {/* Center column — Brain + Timeline */}
+          {/* Center column — 3D Surroundings Heatmap & Neural View */}
           <div className="dash-col">
             {isPerformance && <Timeline currentAct={state.demo_act || 0} />}
             <div className="panel panel-fill" style={{ padding: 0 }}>
               <ErrorBoundary>
                 <div className="viewport">
-                  <BrainViewport activations={activations} />
-                  <div className="viewport-tag">Neural Activity</div>
+                  {centerView === 'spatial' ? (
+                    <SpatialMapViewport state={state} />
+                  ) : (
+                    <BrainViewport activations={activations} />
+                  )}
+
+                  {/* Viewport Mode Switcher */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '10px',
+                      left: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      zIndex: 10,
+                    }}
+                  >
+                    <button
+                      onClick={() => setCenterView('spatial')}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '9px',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                        background: centerView === 'spatial' ? 'rgba(0, 240, 255, 0.25)' : 'rgba(8, 16, 28, 0.7)',
+                        color: centerView === 'spatial' ? '#00f0ff' : 'var(--text-dim)',
+                        border: '1px solid ' + (centerView === 'spatial' ? 'rgba(0, 240, 255, 0.5)' : 'rgba(255, 255, 255, 0.1)'),
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        backdropFilter: 'blur(8px)',
+                      }}
+                    >
+                      3D Surroundings Heatmap
+                    </button>
+                    <button
+                      onClick={() => setCenterView('brain')}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '9px',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                        background: centerView === 'brain' ? 'rgba(0, 240, 255, 0.25)' : 'rgba(8, 16, 28, 0.7)',
+                        color: centerView === 'brain' ? '#00f0ff' : 'var(--text-dim)',
+                        border: '1px solid ' + (centerView === 'brain' ? 'rgba(0, 240, 255, 0.5)' : 'rgba(255, 255, 255, 0.1)'),
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        backdropFilter: 'blur(8px)',
+                      }}
+                    >
+                      Neural Activations
+                    </button>
+                  </div>
                 </div>
               </ErrorBoundary>
             </div>

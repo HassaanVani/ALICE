@@ -79,3 +79,90 @@ async def pick_and_place(arm, gripper, calibration, pick_px: Tuple[int, int],
         return False
 
 
+async def pick_and_inspect(arm, gripper, calibration, pick_px: Tuple[int, int],
+                           inspect_duration: float = 1.5,
+                           config: Optional[PickPlaceConfig] = None) -> bool:
+    """Pick up a small object, lift it to examine it inquisitively, and gently return it."""
+    cfg = config or PickPlaceConfig()
+
+    try:
+        if gripper:
+            gripper.open()
+            await asyncio.sleep(cfg.release_delay)
+
+        # 1. Move above pick position
+        above = calibration.pixel_to_arm(pick_px[0], pick_px[1], cfg.z_safe)
+        arm.move_to(above)
+        await asyncio.sleep(cfg.move_delay)
+
+        # 2. Lower to surface
+        at_pick = calibration.pixel_to_arm(pick_px[0], pick_px[1], cfg.z_pick)
+        arm.move_to(at_pick)
+        await asyncio.sleep(cfg.move_delay)
+
+        # 3. Grab
+        if gripper:
+            gripper.close()
+            await asyncio.sleep(cfg.grab_delay)
+
+        # 4. Lift up for inspection
+        lift = calibration.pixel_to_arm(pick_px[0], pick_px[1], cfg.z_lift)
+        arm.move_to(lift)
+        await asyncio.sleep(cfg.move_delay)
+
+        # 5. Inquisitive hold & head tilt
+        tilted = (lift[0], lift[1], lift[2], lift[3] + 12.0)
+        arm.move_to(tilted, speed=25)
+        await asyncio.sleep(inspect_duration)
+
+        # 6. Lower back to surface
+        arm.move_to(at_pick, speed=30)
+        await asyncio.sleep(cfg.move_delay)
+
+        # 7. Release
+        if gripper:
+            gripper.open()
+            await asyncio.sleep(cfg.release_delay)
+
+        # 8. Retract
+        arm.move_to(above, speed=40)
+        await asyncio.sleep(cfg.move_delay)
+        return True
+    except Exception as e:
+        logger.error(f"pick_and_inspect failed: {e}")
+        if gripper:
+            gripper.open()
+        return False
+
+
+async def nudge_object(arm, calibration, obj_px: Tuple[int, int],
+                       nudge_dx: int = 25, nudge_dy: int = 0,
+                       config: Optional[PickPlaceConfig] = None) -> bool:
+    """Gently poke or nudge an object horizontally and retreat to observe."""
+    cfg = config or PickPlaceConfig()
+
+    try:
+        # Move above start
+        above = calibration.pixel_to_arm(obj_px[0] - nudge_dx, obj_px[1] - nudge_dy, cfg.z_safe)
+        arm.move_to(above)
+        await asyncio.sleep(cfg.move_delay)
+
+        # Lower to contact height
+        contact_start = calibration.pixel_to_arm(obj_px[0] - nudge_dx, obj_px[1] - nudge_dy, cfg.z_pick + 10.0)
+        arm.move_to(contact_start, speed=30)
+        await asyncio.sleep(cfg.move_delay)
+
+        # Push / nudge forward
+        contact_end = calibration.pixel_to_arm(obj_px[0] + nudge_dx, obj_px[1] + nudge_dy, cfg.z_pick + 10.0)
+        arm.move_to(contact_end, speed=35)
+        await asyncio.sleep(0.3)
+
+        # Retract back and up to observe
+        arm.move_to(above, speed=40)
+        await asyncio.sleep(cfg.move_delay)
+        return True
+    except Exception as e:
+        logger.error(f"nudge_object failed: {e}")
+        return False
+
+

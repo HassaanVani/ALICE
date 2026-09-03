@@ -410,6 +410,43 @@ class ObjectInteraction:
             duration_s=time.time() - start,
         )
 
+    async def pick_up_and_inspect(
+        self,
+        label: str,
+        camera_getter: Callable,
+        inspect_duration_s: float = 1.5,
+    ) -> InteractionResult:
+        """Pick up a small desk object, lift it to examine it inquisitively, and return it."""
+        start = time.time()
+        frame = camera_getter()
+        obj_pos = self._find_object(label, frame)
+
+        if obj_pos is None:
+            return InteractionResult(
+                success=False, action="inspect", object_label=label,
+                message=f"can't find the {label}",
+            )
+
+        if self._calibration is None or self._arm is None:
+            return InteractionResult(
+                success=False, action="inspect", object_label=label,
+                message="hardware not connected",
+            )
+
+        from logic.arm_routines import pick_and_inspect
+        success = await pick_and_inspect(
+            self._arm, self._gripper, self._calibration,
+            pick_px=obj_pos, inspect_duration=inspect_duration_s,
+        )
+
+        if success and self._personality:
+            self._personality._last_action_time = time.time()
+
+        return InteractionResult(
+            success=success, action="inspect", object_label=label,
+            duration_s=time.time() - start,
+        )
+
     async def put_away(
         self,
         label: str,

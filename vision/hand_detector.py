@@ -413,7 +413,14 @@ class HandGestureDetector:
         return min(1.0, score)
 
     def _simulate_detect(self, frame: np.ndarray) -> List[HandDetection]:
-        """Return a simulated fist detection for testing."""
+        """Return simulated hand detection for unit tests.
+        
+        Real camera frames (containing non-zero pixels) will NOT hallucinate a fist
+        when running without hardware/MediaPipe.
+        """
+        if frame is not None and np.any(frame) and not getattr(self, "_force_simulated_fist", False):
+            return []
+
         h, w = frame.shape[:2]
         return [
             HandDetection(

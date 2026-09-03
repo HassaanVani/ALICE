@@ -9,6 +9,7 @@ See PERSONALITY.md § Movement as Emotion for the full spec.
 import asyncio
 import logging
 import math
+import random
 import time
 from typing import Optional, Tuple
 
@@ -170,6 +171,59 @@ class MovementDynamics:
 
         # Move slowly — this should be barely perceptible
         self._arm.move_to(target, speed=15)
+
+    async def idle_wander(self, base_pose: Optional[Tuple[float, ...]] = None) -> None:
+        """ALICE organically wanders her surroundings — curious, unhurried, alive.
+
+        Drifts between points of interest across the desk using harmonic sine waves
+        with random lingering pauses and micro-noise.
+        """
+        now = time.time()
+        if not hasattr(self, "_wander_time"):
+            self._wander_time = 0.0
+            self._wander_pause_until = 0.0
+            self._next_wander_linger = now + random.uniform(4.0, 8.0)
+
+        if now < self._wander_pause_until:
+            await asyncio.sleep(0.05)
+            return
+
+        if now > self._next_wander_linger:
+            # Linger at this spot — like she spotted something interesting
+            linger_dur = random.uniform(1.2, 2.5)
+            self._wander_pause_until = now + linger_dur
+            self._next_wander_linger = now + linger_dur + random.uniform(5.0, 12.0)
+            await asyncio.sleep(0.05)
+            return
+
+        self._wander_time += 0.05
+
+        # Base angles to wander around
+        base = list(base_pose or ArmController.HOME_POSITION.as_tuple())
+
+        # Layered sine waves with varied prime periods
+        t = self._wander_time
+        j1_offset = 35.0 * math.sin(2 * math.pi * t / 9.0)
+        j2_offset = 10.0 * math.sin(2 * math.pi * t / 13.0 + 1.0)
+        j3_offset = 12.0 * math.sin(2 * math.pi * t / 15.0 + 2.0)
+        j4_offset = 16.0 * math.sin(2 * math.pi * t / 8.0 + 0.5)
+
+        # Micro noise for liveliness
+        noise_j1 = random.gauss(0, 0.4)
+        noise_j4 = random.gauss(0, 0.3)
+
+        target = (
+            max(-150.0, min(150.0, base[0] + j1_offset + noise_j1)),
+            max(-2.0, min(65.0, base[1] + j2_offset)),
+            max(-90.0, min(40.0, base[2] + j3_offset)),
+            max(-170.0, min(170.0, base[3] + j4_offset + noise_j4)),
+        )
+
+        speed = 22.0
+        if self._llm_interpreter is not None:
+            speed *= self._llm_interpreter.modifiers.spd
+
+        self._arm.move_to(target, speed=speed)
 
     def set_interest_point(self, angles: Tuple[float, ...]) -> None:
         """Set the point ALICE's idle scanning should orient toward."""

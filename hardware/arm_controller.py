@@ -94,29 +94,43 @@ class ArmController:
             self._current_position = ArmPosition()
             return True
 
-        # Try serial first
-        try:
-            self._mc = MyPalletizer260(self.port, self.baudrate)
-            time.sleep(1)
-            # Verify the connection actually works
-            angles = self._mc.get_angles()
-            if angles != -1 and angles is not None:
-                self._state = ArmState.IDLE
-                self._current_position = ArmPosition()
-                self._reconnect_attempts = 0
-                self._connection_type = "serial"
-                logger.info(f"Connected via serial on {self.port}")
-                return True
-            else:
-                logger.warning(f"Serial port {self.port} opened but arm not responding")
-                try:
-                    self._mc.close() if hasattr(self._mc, 'close') else None
-                except Exception:
-                    pass
+        # Try serial first (support /dev/tty and /dev/cu on macOS)
+        ports_to_try = [self.port] if self.port else []
+        if self.port and self.port.startswith("/dev/tty."):
+            ports_to_try.append(self.port.replace("/dev/tty.", "/dev/cu."))
+        elif self.port and self.port.startswith("/dev/cu."):
+            ports_to_try.append(self.port.replace("/dev/cu.", "/dev/tty."))
+
+        for p in ports_to_try:
+            try:
+                self._mc = MyPalletizer260(p, self.baudrate)
+                time.sleep(1.5)
+                # Verify the connection actually works (M5Stack boot/sync retry)
+                angles = None
+                for _ in range(4):
+                    angles = self._mc.get_angles()
+                    if angles and angles != -1 and isinstance(angles, list) and len(angles) >= 4:
+                        break
+                    time.sleep(0.4)
+
+                if angles and angles != -1 and isinstance(angles, list) and len(angles) >= 4:
+                    self._state = ArmState.IDLE
+                    self._current_position = ArmPosition.from_tuple(tuple(angles[:4]))
+                    self._reconnect_attempts = 0
+                    self._connection_type = "serial"
+                    self.port = p
+                    logger.info(f"Connected via serial on {p} (angles={angles[:4]})")
+                    return True
+                else:
+                    logger.warning(f"Serial port {p} opened but arm not responding")
+                    try:
+                        self._mc.close() if hasattr(self._mc, 'close') else None
+                    except Exception:
+                        pass
+                    self._mc = None
+            except Exception as e:
+                logger.warning(f"Serial connection on {p} failed: {e}")
                 self._mc = None
-        except Exception as e:
-            logger.warning(f"Serial connection failed: {e}")
-            self._mc = None
 
         # Fall back to WiFi if configured
         if self._wifi_ip:

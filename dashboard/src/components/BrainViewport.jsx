@@ -294,35 +294,41 @@ export default function BrainViewport({ activations }) {
     };
   }, []);
 
+  const activationList = Array.isArray(activations)
+    ? activations
+    : (Array.isArray(activations?.activations) ? activations.activations : []);
+
   // Hide waiting label on first activation data
   useEffect(() => {
-    if (activations && activations.length > 0 && showWaiting) {
+    if (activationList.length > 0 && showWaiting) {
       setShowWaiting(false);
     }
-  }, [activations, showWaiting]);
+  }, [activationList, showWaiting]);
 
   // Update neuron activations when data changes
   useEffect(() => {
-    if (!neuronsRef.current || !activations || activations.length === 0) return;
+    if (!neuronsRef.current || activationList.length === 0) return;
 
     const neurons = neuronsRef.current;
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
 
     // Flatten all activation values
-    const allValues = activations.flatMap((l) => l.values);
+    const allValues = activationList.flatMap((l) => (Array.isArray(l?.values) ? l.values : []));
+    if (allValues.length === 0) return;
     const maxVal = Math.max(...allValues.map(Math.abs), 0.001);
 
     // Map activation layers to neuron depth zones
-    const neuronsPerLayer = Math.ceil(NEURON_COUNT / activations.length);
+    const neuronsPerLayer = Math.ceil(NEURON_COUNT / activationList.length);
 
     for (let i = 0; i < NEURON_COUNT; i++) {
       const [px, py, pz] = NEURON_POSITIONS[i];
 
       // Which activation layer does this neuron belong to
-      const layerIdx = Math.min(activations.length - 1, Math.floor(i / neuronsPerLayer));
+      const layerIdx = Math.min(activationList.length - 1, Math.floor(i / neuronsPerLayer));
       const withinLayer = i - layerIdx * neuronsPerLayer;
-      const layer = activations[layerIdx];
+      const layer = activationList[layerIdx];
+      if (!layer || !layer.values || layer.values.length === 0) continue;
       const valIdx = withinLayer % layer.values.length;
       const val = layer.values[valIdx];
       const norm = Math.abs(val) / maxVal;

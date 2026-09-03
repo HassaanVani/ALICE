@@ -1,17 +1,15 @@
-"""Idle mode — ALICE watches, scans, and drifts to Tetris when bored.
+"""Idle mode — ALICE watches, wanders, and explores her desk with curiosity.
 
 She's never fully still when awake. Subtle scanning movements show awareness.
-After enough idle time, she drifts to the keyboard and plays Tetris — not as
-a demo, but because she wants to. She finishes her current piece before
-responding to interrupts.
-
-See PERSONALITY.md § The Tetris Quirk for the full spec.
+When curious about desk items, she leans in, attempts to pick up small objects
+to inspect them, nudges larger objects, or organically wanders the workspace.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -21,12 +19,16 @@ from ._base import ModeRunner
 
 logger = logging.getLogger("ALICE")
 
+SMALL_PICKABLE_OBJECTS = {
+    "pen", "pencil", "marker", "scissors", "block", "cube", "dice", "small bottle"
+}
+NUDGE_ELIGIBLE_OBJECTS = {
+    "cup", "mug", "bowl", "bottle", "box", "book", "cell phone", "phone"
+}
+
 
 class IdleRunner(ModeRunner):
     async def run(self) -> None:
-        tetris_active = False
-        tetris_controller = None
-
         # Fist bump — use protocol from registry if available, else direct
         fist_bump_protocol = self.ctx.registry.get("fist_bump") if self.ctx.registry else None
         if fist_bump_protocol is not None:
@@ -35,8 +37,12 @@ class IdleRunner(ModeRunner):
             from logic.fist_bump import FistBumpInteraction
             fist_bump = FistBumpInteraction()
 
+        # Disable unsolicited spontaneous fist bumps during idle
+        fist_bump._allow_initiated = False
+
         # Auto-cleanup state
         last_cleanup_time: float = 0.0
+        last_explore_time: float = 0.0
 
         # Living behaviors — snapshot references (None when disabled)
         gaze = self.ctx.gaze_tracker
@@ -119,8 +125,7 @@ class IdleRunner(ModeRunner):
                 curiosity.tick()
 
             if habits is not None and obj_memory is not None:
-                import time as _time
-                now = _time.time()
+                now = time.time()
                 lb_cfg = getattr(self.ctx.config, 'living_behaviors', None)
                 snapshot_interval = getattr(lb_cfg, 'habit_snapshot_interval_s', 30.0) if lb_cfg else 30.0
                 if now - last_habit_snapshot > snapshot_interval:
@@ -131,8 +136,8 @@ class IdleRunner(ModeRunner):
             if body_lang is not None:
                 body_lang.tick(self.ctx.config.timing.idle_loop_s)
 
-            # Proactive engagement — only when not in tetris and no bump happening
-            if proactive is not None and not tetris_active and not proactive.is_executing:
+            # Proactive engagement
+            if proactive is not None and not proactive.is_executing:
                 decision = proactive.decide(presence)
                 if decision.action.value != "none":
                     await proactive.execute(
@@ -157,12 +162,15 @@ class IdleRunner(ModeRunner):
                                       if proactive else "none",
                 )
 
-            # --- Fist bump (reactive + initiated) ---
-            # Uses the arm camera — ALICE sees the fist through her own eyes
-            bump_happened = False
+            if obj_memory is not None and hasattr(obj_memory, 'objects'):
+                self.ctx.state_manager.update_object_memory([
+                    o.to_dict() for o in obj_memory.objects.values()
+                ])
 
+            # --- Fist bump (reactive ONLY) ---
+            # Responds when the user intentionally offers a fist
+            bump_happened = False
             if frame is not None and not fist_bump.on_cooldown:
-                # Reactive: check if someone is offering a fist bump
                 bump_happened = await fist_bump.check_and_respond(
                     frame,
                     arm=self.ctx.arm,
@@ -172,48 +180,12 @@ class IdleRunner(ModeRunner):
                     state_manager=self.ctx.state_manager,
                 )
 
-            if not bump_happened and not fist_bump.initiate_on_cooldown:
-                # Initiated: maybe ALICE offers a fist bump
-                from vision.presence import PresenceInfo
-                # Use real presence if available, else fallback
-                if presence is None:
-                    presence = PresenceInfo(
-                        detected=front_frame is not None,
-                        closest_distance=50.0 if front_frame is not None else float("inf"),
-                        looking_at_desk=True,
-                    )
-                if fist_bump.should_initiate(
-                    personality=self.ctx.personality,
-                    presence_info=presence,
-                ):
-                    arm_getter = lambda: self.ctx.cameras.get_frame(CameraRole.OVERHEAD)
-                    bump_happened = await fist_bump.initiate_bump(
-                        camera_getter=arm_getter,
-                        arm=self.ctx.arm,
-                        dynamics=self.ctx.dynamics,
-                        personality=self.ctx.personality,
-                        narration=self.ctx.narration,
-                        state_manager=self.ctx.state_manager,
-                    )
-
             if bump_happened:
-                # After a fist bump, pause Tetris if active — she's socializing
-                if tetris_active:
-                    await self._stop_tetris(tetris_controller)
-                    tetris_active = False
-                    tetris_controller = None
-                    if self.ctx.personality is not None:
-                        self.ctx.personality.on_interrupt_from_tetris()
-                # Skip the rest of this tick
                 await asyncio.sleep(self.ctx.config.timing.idle_loop_s)
                 continue
 
             # --- Peripheral glance: sneaking a look at the user ---
-            # If peripheral vision caught something interesting, find a
-            # natural moment to sweep the arm camera toward the user.
-            # The glance is subtle — she extends her current motion slightly
-            # further, grabs a frame, then returns.
-            if peripheral.has_pending_glance and not bump_happened:
+            if peripheral.has_pending_glance:
                 glance = peripheral.get_pending_glance()
                 if glance is not None:
                     confirmed = await self._execute_glance(
@@ -222,134 +194,152 @@ class IdleRunner(ModeRunner):
                     if confirmed and body_lang is not None:
                         body_lang._trigger("attentive")
 
-            # Idle behaviors
-            if behavior == "tetris" and not tetris_active:
-                # Drift to Tetris — she decided to play
-                tetris_controller = self._try_start_tetris()
-                if tetris_controller is not None:
-                    tetris_active = True
-                    if self.ctx.personality is not None:
-                        self.ctx.personality.enter_flow_state()
-                    logger.info("Idle: drifting to Tetris")
+            # --- Active Curiosity Interaction (Pick up small things / Nudge) ---
+            now = time.time()
+            if (curiosity is not None and self.ctx.arm is not None
+                    and self.ctx.calibration is not None
+                    and now - last_explore_time > 15.0):
+                most_curious = curiosity.get_most_curious()
+                if most_curious and most_curious.curiosity_level >= 0.4:
+                    explored = await self._explore_curious_object(
+                        most_curious.object_id,
+                        most_curious.label,
+                        curiosity,
+                    )
+                    if explored:
+                        last_explore_time = time.time()
 
-            elif behavior == "micro_motion" and not tetris_active:
-                # Subtle scanning — she's watching
+            # --- Auto-cleanup: ALICE notices trash and tidies up ---
+            if hasattr(self.ctx, 'config') and self.ctx.config.trash_zone.enabled:
+                from logic.object_interaction import ObjectInteraction, TrashZone
+                if (self.ctx.arm and self.ctx.gripper and self.ctx.calibration
+                        and hasattr(self.ctx.inference, 'yolo')):
+                    trash = TrashZone(
+                        pixel_x=self.ctx.config.trash_zone.pixel_x,
+                        pixel_y=self.ctx.config.trash_zone.pixel_y,
+                        enabled=True,
+                        detect_label=self.ctx.config.trash_zone.detect_label,
+                    )
+                    interaction = ObjectInteraction(
+                        arm=self.ctx.arm,
+                        gripper=self.ctx.gripper,
+                        calibration=self.ctx.calibration,
+                        dynamics=self.ctx.dynamics,
+                        personality=self.ctx.personality,
+                        yolo_detector=self.ctx.inference.yolo,
+                        narration=self.ctx.narration,
+                        trash_zone=trash,
+                    )
+                    camera_getter = lambda: self.ctx.cameras.get_frame(CameraRole.OVERHEAD)
+                    if interaction.should_auto_cleanup(
+                        personality=self.ctx.personality,
+                        last_cleanup_time=last_cleanup_time,
+                    ):
+                        result = await interaction.auto_cleanup(
+                            camera_getter,
+                            personality=self.ctx.personality,
+                            narration=self.ctx.narration,
+                        )
+                        if result.success:
+                            last_cleanup_time = time.time()
+
+            # --- Idle behaviors ---
+            if behavior == "wander":
+                # Organic wandering across desk — curious exploration
+                if self.ctx.dynamics is not None:
+                    await self.ctx.dynamics.idle_wander()
+
+            elif behavior == "micro_motion":
+                # Subtle scanning & breathing
                 if self.ctx.dynamics is not None:
                     await self.ctx.dynamics.idle_micro_motion()
 
             elif behavior == "watch":
-                # Just watching. Camera + inference running above.
-                if tetris_active:
-                    # Was playing Tetris but something changed (presence?)
-                    # Finish current piece, then stop
-                    await self._stop_tetris(tetris_controller)
-                    tetris_active = False
-                    tetris_controller = None
-                    if self.ctx.personality is not None:
-                        self.ctx.personality.on_interrupt_from_tetris()
-
-                # --- Auto-cleanup: ALICE notices trash and tidies up ---
-                if hasattr(self.ctx, 'config') and self.ctx.config.trash_zone.enabled:
-                    from logic.object_interaction import ObjectInteraction
-                    # Build an interaction instance if we have the pieces
-                    if (self.ctx.arm and self.ctx.gripper and self.ctx.calibration
-                            and hasattr(self.ctx.inference, 'yolo')):
-                        from logic.object_interaction import TrashZone
-                        trash = TrashZone(
-                            pixel_x=self.ctx.config.trash_zone.pixel_x,
-                            pixel_y=self.ctx.config.trash_zone.pixel_y,
-                            enabled=True,
-                            detect_label=self.ctx.config.trash_zone.detect_label,
-                        )
-                        interaction = ObjectInteraction(
-                            arm=self.ctx.arm,
-                            gripper=self.ctx.gripper,
-                            calibration=self.ctx.calibration,
-                            dynamics=self.ctx.dynamics,
-                            personality=self.ctx.personality,
-                            yolo_detector=self.ctx.inference.yolo,
-                            narration=self.ctx.narration,
-                            trash_zone=trash,
-                        )
-                        camera_getter = lambda: self.ctx.cameras.get_frame(CameraRole.OVERHEAD)
-                        if interaction.should_auto_cleanup(
-                            personality=self.ctx.personality,
-                            last_cleanup_time=last_cleanup_time,
-                        ):
-                            # She decided to clean
-                            result = await interaction.auto_cleanup(
-                                camera_getter,
-                                personality=self.ctx.personality,
-                                narration=self.ctx.narration,
-                            )
-                            if result.success:
-                                import time as _time
-                                last_cleanup_time = _time.time()
-
-            # If Tetris is active, run one cycle
-            if tetris_active and tetris_controller is not None:
-                try:
-                    await tetris_controller.run_one_cycle()
-                except Exception as e:
-                    logger.debug(f"Tetris cycle error: {e}")
-                    tetris_active = False
-                    tetris_controller = None
-                    if self.ctx.personality is not None:
-                        self.ctx.personality.exit_flow_state()
+                # Attentive watch — apply gaze tracking if looking at a target
+                if gaze is not None and self.ctx.dynamics is not None:
+                    await gaze.apply(self.ctx.dynamics)
 
             await asyncio.sleep(self.ctx.config.timing.idle_loop_s)
 
-        # Clean shutdown — only if we created the fist bump locally
+        # Clean shutdown
         if fist_bump_protocol is None:
             fist_bump.shutdown()
-        if tetris_active and tetris_controller is not None:
-            await self._stop_tetris(tetris_controller)
-            if self.ctx.personality is not None:
-                self.ctx.personality.exit_flow_state()
+
+    async def _explore_curious_object(
+        self,
+        object_id: str,
+        label: str,
+        curiosity,
+    ) -> bool:
+        """Physical curiosity exploration — pick up small things or nudge objects."""
+        record = curiosity.records.get(object_id)
+        if not record or not record.last_position:
+            return False
+
+        px = (int(record.last_position[0]), int(record.last_position[1]))
+        normalized_label = label.lower().strip()
+
+        is_small_pickable = (
+            normalized_label in SMALL_PICKABLE_OBJECTS
+            or any(k in normalized_label for k in ["pen", "marker", "pencil", "cube", "block", "dice", "clip", "eraser"])
+        )
+
+        from logic.arm_routines import pick_and_inspect, nudge_object
+
+        try:
+            if is_small_pickable and self.ctx.gripper is not None:
+                logger.info(f"Curiosity exploration: attempting to pick up and inspect '{label}'")
+                success = await pick_and_inspect(
+                    self.ctx.arm,
+                    self.ctx.gripper,
+                    self.ctx.calibration,
+                    pick_px=px,
+                    inspect_duration=1.6,
+                )
+            else:
+                logger.info(f"Curiosity exploration: nudging '{label}' to observe movement")
+                success = await nudge_object(
+                    self.ctx.arm,
+                    self.ctx.calibration,
+                    obj_px=px,
+                    nudge_dx=25,
+                )
+
+            if success:
+                curiosity.record_examination(object_id)
+                if self.ctx.personality:
+                    self.ctx.personality._last_action_time = time.time()
+                return True
+        except Exception as e:
+            logger.debug(f"Curiosity exploration failed: {e}")
+
+        return False
 
     async def _execute_glance(self, glance, peripheral, fist_bump) -> bool:
-        """The glance — ALICE sweeps her arm camera toward the user.
-
-        She doesn't snap to look at them. She extends her current motion
-        slightly further than needed, as if stretching or scanning a bit
-        wider, and the arm camera catches a frame of the user on the way
-        through. Then she returns to what she was doing.
-
-        If the glance confirms a fist bump, she responds directly.
-        """
+        """The glance — ALICE sweeps her arm camera toward the user."""
         from logic.peripheral_awareness import PeripheralEvent
 
         if self.ctx.arm is None:
             return False
 
-        # Save current position — she'll return here after the glance
         current = self.ctx.arm.position.as_tuple()
-
-        # The glance: swing base rotation toward the user (roughly forward)
-        # and tilt slightly up — a natural "stretching" motion
         glance_angles = (
-            current[0],                    # keep base where it is
-            current[1] + 5,                # lift shoulder slightly
-            current[2] - 3,                # extend elbow slightly
-            current[3],                    # keep wrist
+            current[0],
+            current[1] + 5,
+            current[2] - 3,
+            current[3],
         )
 
-        # Move to glance position — smooth, not snappy
-        speed = 20  # slow, casual
+        speed = 20
         self.ctx.arm.move_to(glance_angles, speed=speed)
         await asyncio.sleep(0.4)
 
-        # Grab a frame from the arm camera — this is the actual look
         arm_frame = self.ctx.cameras.get_frame(CameraRole.OVERHEAD)
-
-        # Check what we saw
         confirmed_event = peripheral.execute_glance(glance, arm_frame)
 
-        # Return to previous position — smooth drift back
         self.ctx.arm.move_to(current, speed=15)
         await asyncio.sleep(0.3)
 
-        # If we confirmed a fist bump, respond
         if confirmed_event == PeripheralEvent.FIST_OFFERED:
             if arm_frame is not None:
                 await fist_bump.check_and_respond(
@@ -363,38 +353,3 @@ class IdleRunner(ModeRunner):
             return True
 
         return confirmed_event is not None
-
-    def _try_start_tetris(self) -> Optional[object]:
-        """Try to create a Tetris controller for idle play.
-
-        Returns the controller if successful, None if Tetris isn't available.
-        """
-        if self.ctx.tetris is None:
-            return None
-
-        try:
-            from logic import TetrisController
-            from vision.screen_reader import ScreenReader, ScreenRegion
-            from hardware.keyboard_player import KeyboardPlayer
-
-            ts = self.ctx.config.tetris_screen
-            region = ScreenRegion(
-                left=ts.board_left, top=ts.board_top,
-                width=ts.board_width, height=ts.board_height,
-            )
-            reader = ScreenReader(region)
-            player = KeyboardPlayer(self.ctx.arm, Path(ts.key_calibration_path))
-            return TetrisController(reader, player, self.ctx.tetris)
-        except Exception as e:
-            logger.debug(f"Tetris setup failed (idle): {e}")
-            return None
-
-    async def _stop_tetris(self, controller) -> None:
-        """Stop Tetris gracefully — she finishes her current piece first."""
-        if controller is not None:
-            try:
-                # Give her a moment to finish the current piece
-                await asyncio.sleep(0.5)
-                controller.stop()
-            except Exception:
-                pass

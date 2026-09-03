@@ -17,6 +17,8 @@ from modes import UI_SWITCHABLE_MODES
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger("TensorServer")
+# Suppress noisy tracebacks when clients (like React StrictMode or browser tabs) abort mid-handshake
+logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
 
 
 class TensorStreamServer:

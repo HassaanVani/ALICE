@@ -65,5 +65,7 @@ export function useTensorStream() {
     return () => removeBinaryListener(handler);
   }, [addBinaryListener, removeBinaryListener]);
 
-  return { activations };
+  const result = activations;
+  result.activations = activations;
+  return result;
 }

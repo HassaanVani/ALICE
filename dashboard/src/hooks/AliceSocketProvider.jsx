@@ -62,7 +62,16 @@ export function AliceSocketProvider({ children }) {
     connect();
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        const ws = wsRef.current;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          // Avoid abruptly terminating mid-handshake
+          ws.onopen = () => ws.close();
+        }
+        wsRef.current = null;
+      }
     };
   }, [connect]);
 

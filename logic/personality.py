@@ -141,8 +141,8 @@ class PersonalityEngine:
 
     # Idle behavior thresholds (seconds)
     IDLE_MICRO_MOTION_DELAY = 3.0     # start subtle scanning after this
-    IDLE_TETRIS_DELAY = 30.0          # drift to tetris after this
-    IDLE_TETRIS_DELAY_NO_PRESENCE = 10.0  # faster when nobody's around
+    IDLE_WANDER_DELAY = 8.0           # drift to organic wandering after this
+    IDLE_TETRIS_DELAY = 30.0          # legacy alias
 
     def __init__(self):
         self._preferences: Dict[str, ObjectPreference] = {}
@@ -306,15 +306,12 @@ class PersonalityEngine:
     def get_idle_behavior(self) -> str:
         """What ALICE should do when idle.
 
-        Returns: 'watch', 'micro_motion', or 'tetris'
+        Returns: 'watch', 'micro_motion', or 'wander'
         """
         idle_time = time.time() - self._last_action_time
 
-        tetris_delay = (self.IDLE_TETRIS_DELAY if self._presence_detected
-                        else self.IDLE_TETRIS_DELAY_NO_PRESENCE)
-
-        if idle_time >= tetris_delay:
-            return "tetris"
+        if idle_time >= self.IDLE_WANDER_DELAY:
+            return "wander"
         elif idle_time >= self.IDLE_MICRO_MOTION_DELAY:
             return "micro_motion"
         else:
