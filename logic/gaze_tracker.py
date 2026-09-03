@@ -54,7 +54,7 @@ class GazeTracker:
     MAX_J2_FACE = 15.0   # degrees shoulder range for vertical tracking
 
     # Neutral "looking at user" position — calibrated on real hardware
-    NEUTRAL_ANGLES = (-9.0, 45.0, -57.0, 43.0)
+    NEUTRAL_ANGLES = (-9.0, -2.0, -72.0, 43.0)
 
     # Smoothing — lower = smoother/slower tracking
     DEFAULT_ALPHA = 0.06

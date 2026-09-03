@@ -173,13 +173,13 @@ class MovementDynamics:
         self._arm.move_to(target, speed=15)
 
     # Programmed panoramic sweep waypoints calibrated for far-left desk mount:
-    # Starts at left desk edge home (-9°) and traverses across the entire desk to the right (+155°)
+    # Uses proven J2=-2.0, J3=-72.0 for maximum table clearance and sweeps J1 rightward (-9° to +155°)
     PANORAMIC_SWEEP_WAYPOINTS = (
-        (-9.0, 45.0, -57.0, 43.0),     # Left Desk Edge (Calibrated User Home)
-        (30.0, 44.0, -58.0, 42.0),     # Near-Center Desk
-        (75.0, 42.0, -58.0, 40.0),     # Mid-Right Desk Work Area
-        (120.0, 39.0, -60.0, 36.0),    # Far-Right Desk Area
-        (155.0, 36.0, -64.0, 32.0),    # Maximum Right Traversal
+        (-9.0, -2.0, -72.0, 43.0),     # Left Desk Edge (Upright, clear of table)
+        (30.0, -2.0, -72.0, 43.0),     # Near-Center Desk
+        (75.0, -2.0, -72.0, 43.0),     # Mid-Right Desk Work Area
+        (120.0, -2.0, -72.0, 43.0),    # Far-Right Desk Area
+        (155.0, -2.0, -72.0, 43.0),    # Maximum Right Traversal
     )
 
     async def idle_wander(self, base_pose: Optional[Tuple[float, ...]] = None) -> None:

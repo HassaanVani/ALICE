@@ -40,7 +40,7 @@ class ArmPosition:
 class ArmController:
     AXIS_COUNT = 4
     JOINT_LIMITS = ((-162, 162), (-2, 90), (-92, 60), (-180, 180))
-    HOME_POSITION = ArmPosition(-9, 45, -57, 43)  # Calibrated user neutral & wave home
+    HOME_POSITION = ArmPosition(-9, -2, -72, 43)  # Calibrated neutral: upright and clear of table
 
     MAX_RECONNECT_ATTEMPTS = 5
     RECONNECT_BASE_DELAY = 0.5
