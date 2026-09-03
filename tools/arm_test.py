@@ -191,14 +191,17 @@ class ArmTestUI:
         action_row.pack(fill="x")
 
         tk.Button(action_row, text="Dance", bg="#e94560", fg="white",
-                 font=("Helvetica", 11, "bold"), width=10,
-                 command=self._dance).pack(side="left", padx=5)
+                 font=("Helvetica", 11, "bold"), width=8,
+                 command=self._dance).pack(side="left", padx=3)
         tk.Button(action_row, text="Fist Bump", bg="#e94560", fg="white",
-                 font=("Helvetica", 11, "bold"), width=10,
-                 command=self._fist_bump).pack(side="left", padx=5)
+                 font=("Helvetica", 11, "bold"), width=8,
+                 command=self._fist_bump).pack(side="left", padx=3)
+        tk.Button(action_row, text="Wave Cam", bg="#50fa7b", fg="#0a0a1a",
+                 font=("Helvetica", 11, "bold"), width=9,
+                 command=self._wave_to_camera).pack(side="left", padx=3)
         tk.Button(action_row, text="Read", bg="#0f3460", fg="#e0e0e0",
-                 font=("Helvetica", 10), width=8,
-                 command=self._read_angles).pack(side="left", padx=5)
+                 font=("Helvetica", 10), width=6,
+                 command=self._read_angles).pack(side="left", padx=3)
 
         # Angles readout
         self.readout_var = tk.StringVar(value="")
@@ -358,6 +361,52 @@ class ArmTestUI:
             time.sleep(1)
 
             mc.set_gripper_state(0, 50)
+
+        self._run_in_thread(routine)
+
+    def _wave_to_camera(self):
+        def routine():
+            mc = self.mc
+            # Home / default neutral pose
+            neutral = [-9.0, 45.0, -57.0, 43.0]
+
+            # Step 0: Ensure gripper is closed and at neutral
+            try:
+                mc.set_gripper_state(1, 80)
+            except Exception:
+                pass
+
+            mc.send_angles(neutral, 35)
+            time.sleep(1.2)
+
+            # Step 1: Move J2 to -2 and J3 to -92
+            mc.send_angles([neutral[0], -2.0, -92.0, neutral[3]], 40)
+            time.sleep(1.2)
+
+            # Step 2: Move J1 to 162
+            mc.send_angles([162.0, -2.0, -92.0, neutral[3]], 40)
+            time.sleep(1.4)
+
+            # Step 3: Move J2 up and down 15-20 degrees (wave)
+            for _ in range(4):
+                mc.send_angles([162.0, 16.0, -92.0, neutral[3]], 55)
+                time.sleep(0.35)
+                mc.send_angles([162.0, -2.0, -92.0, neutral[3]], 55)
+                time.sleep(0.35)
+
+            # Step 4: Return to neutral
+            mc.send_angles([neutral[0], -2.0, -92.0, neutral[3]], 40)
+            time.sleep(1.2)
+
+            mc.send_angles(neutral, 35)
+            time.sleep(1.2)
+
+            try:
+                mc.set_gripper_state(1, 80)
+            except Exception:
+                pass
+
+        self._run_in_thread(routine)
 
         self._run_in_thread(routine)
 

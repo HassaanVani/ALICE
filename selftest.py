@@ -129,6 +129,32 @@ class SelfTest:
                 sock.close()
         return self._run_check(f"{name} Port ({port})", _check)
 
+    def check_yolo(self) -> CheckResult:
+        def _check():
+            try:
+                import ultralytics
+                return True, f"Ultralytics YOLOv8 OK (v{ultralytics.__version__})"
+            except ImportError:
+                return False, "ultralytics not installed ('pip install ultralytics' for desk object detection)"
+        return self._run_check("YOLO Detector", _check)
+
+    def check_ollama(self) -> CheckResult:
+        def _check():
+            import urllib.request
+            import json
+            try:
+                req = urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+                data = json.loads(req.read().decode())
+                models = [m.get("name") for m in data.get("models", [])]
+                if "llama3.2:3b" in models or any("llama3.2" in m for m in models):
+                    return True, f"Ollama running with llama3.2 ({len(models)} models available)"
+                elif models:
+                    return True, f"Ollama running ({', '.join(models[:3])})"
+                return False, "Ollama running but no models found ('ollama pull llama3.2:3b')"
+            except Exception as e:
+                return False, f"Ollama not running on http://localhost:11434 ({e})"
+        return self._run_check("Local LLM (Ollama)", _check)
+
     def run_all(self, ws_ports: List[int] = None) -> List[CheckResult]:
         """Run all self-test checks."""
         self.results.clear()
@@ -138,7 +164,8 @@ class SelfTest:
         self.check_magnet()
         self.check_calibration_file()
         self.check_cnn_weights()
-        self.check_aruco_detection()
+        self.check_yolo()
+        self.check_ollama()
 
         for port in (ws_ports or [8765, 8766, 8767]):
             self.check_websocket_port(port)
@@ -148,7 +175,7 @@ class SelfTest:
 
     def _print_report(self) -> None:
         """Print formatted pass/fail table."""
-        width = 60
+        width = 65
         print("\n" + "=" * width)
         print("  A.L.I.C.E. Self-Test Report")
         print("=" * width)
@@ -159,16 +186,26 @@ class SelfTest:
         for r in self.results:
             status = "PASS" if r.passed else "WARN"
             icon = "+" if r.passed else "!"
-            name_padded = r.name.ljust(25)
+            name_padded = r.name.ljust(22)
             dur = f"{r.duration_ms:.0f}ms".rjust(6)
             print(f"  [{icon}] {name_padded} {status}  {dur}  {r.message}")
 
         print("-" * width)
         print(f"  Result: {passed}/{total} checks passed")
         if passed < total:
-            print("  (Warnings only — system will continue)")
+            print("  (Warnings only — system will gracefully continue with fallbacks)")
         print("=" * width + "\n")
 
     @property
     def all_passed(self) -> bool:
         return all(r.passed for r in self.results)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="ALICE Self-Test Diagnostic")
+    parser.add_argument("--hardware", action="store_true", help="Test real hardware instead of simulated")
+    args = parser.parse_args()
+
+    st = SelfTest(simulate=not args.hardware)
+    st.run_all()

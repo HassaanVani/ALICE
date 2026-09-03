@@ -44,6 +44,28 @@ wander_thread = None
 DEFAULT_ANGLES = [-33, -2, -72, 43]
 SLEEP_ANGLES = [-14, 38, -31, 36]
 
+# Wave to Camera state
+wave_active = False
+wave_cancel_event = threading.Event()
+wave_status = {"active": False, "stage": "idle"}
+
+
+def calculate_180_rotation_angles(neutral_angles):
+    """Calculate the base rotation by 180 degrees from neutral angles.
+    MyPalletizer 260 J1 limits are [-162, 162].
+    If neutral J1 + 180 <= 162, use neutral J1 + 180.
+    Else, use neutral J1 - 180.
+    Clamps within [-162, 162].
+    """
+    j1 = float(neutral_angles[0])
+    if j1 + 180.0 <= 162.0:
+        rot_j1 = j1 + 180.0
+    else:
+        rot_j1 = j1 - 180.0
+    rot_j1 = max(-162.0, min(162.0, rot_j1))
+    return rot_j1
+
+
 # ── Connection ───────────────────────────────────────────────────
 
 def list_serial_ports():
@@ -1384,6 +1406,127 @@ def api_fistbump():
     return jsonify({"ok": True})
 
 
+WAVE_DEFAULT_ANGLES = [-9, 45, -57, 43]
+
+
+def execute_wave_camera_sequence(mc_instance, neutral_angles=None, speed=40):
+    """Executes the 'Wave to Camera' choreography:
+    1. Home & default neutral: [-9, 45, -57, 43] with gripper closed.
+    2. Move J2 to -2 and J3 to -92.
+    3. Move J1 to 162.
+    4. Move J2 up and down 15-20 degrees (waving motion).
+    5. Return to neutral pose with gripper closed.
+    """
+    global wave_active, wave_status, wave_cancel_event
+
+    wave_active = True
+    wave_status = {"active": True, "stage": "moving_to_neutral"}
+
+    try:
+        if neutral_angles is None:
+            neutral = list(WAVE_DEFAULT_ANGLES)
+        else:
+            neutral = [float(x) for x in neutral_angles]
+
+        j4_neutral = neutral[3] if len(neutral) > 3 else 43.0
+
+        # Step 0: Ensure gripper is closed and arm is at neutral
+        try:
+            mc_instance.set_gripper_state(1, 80)
+        except Exception:
+            pass
+
+        mc_instance.send_angles(neutral, int(speed * 0.9))
+        if wave_cancel_event.wait(1.2):
+            return
+
+        # Step 1: Move J2 to -2 and J3 to -92
+        wave_status["stage"] = "tucking_j2_j3"
+        step1_angles = [neutral[0], -2.0, -92.0, j4_neutral]
+        mc_instance.send_angles(step1_angles, int(speed))
+        if wave_cancel_event.wait(1.2):
+            return
+
+        # Step 2: Move J1 to 162
+        wave_status["stage"] = "rotating_j1_162"
+        step2_angles = [162.0, -2.0, -92.0, j4_neutral]
+        mc_instance.send_angles(step2_angles, int(speed))
+        if wave_cancel_event.wait(1.4):
+            return
+
+        # Step 3: Move J2 up and down 15-20 degrees (wave motion)
+        wave_status["stage"] = "waving_j2"
+        # 4 cycles of up (J2=-2 + 18 = 16°) and down (J2=-2°)
+        for _ in range(4):
+            mc_instance.send_angles([162.0, 16.0, -92.0, j4_neutral], int(speed * 1.3))
+            if wave_cancel_event.wait(0.35):
+                return
+            mc_instance.send_angles([162.0, -2.0, -92.0, j4_neutral], int(speed * 1.3))
+            if wave_cancel_event.wait(0.35):
+                return
+
+        # Step 4: Gracefully return to neutral position
+        wave_status["stage"] = "returning_to_neutral"
+        # Move J1 back to neutral
+        mc_instance.send_angles([neutral[0], -2.0, -92.0, j4_neutral], int(speed))
+        if wave_cancel_event.wait(1.2):
+            return
+
+        # Return to full neutral
+        mc_instance.send_angles(neutral, int(speed * 0.8))
+        if wave_cancel_event.wait(1.2):
+            return
+
+        # Ensure gripper closed
+        try:
+            mc_instance.set_gripper_state(1, 80)
+        except Exception:
+            pass
+
+        wave_status = {"active": False, "stage": "completed"}
+    except Exception as e:
+        wave_status = {"active": False, "stage": f"error: {e}"}
+    finally:
+        wave_active = False
+
+
+@app.route("/api/wave_camera", methods=["POST"])
+def api_wave_camera():
+    global wave_active, wave_cancel_event
+    if mc is None:
+        return jsonify({"error": "not connected"})
+    if wave_active:
+        return jsonify({"error": "wave routine already active"})
+
+    data = request.json or {}
+    neutral = data.get("neutral_angles")
+    if not neutral or len(neutral) != 4:
+        neutral = list(WAVE_DEFAULT_ANGLES)
+
+    speed = int(data.get("speed", 40))
+    wave_cancel_event.clear()
+
+    def routine():
+        execute_wave_camera_sequence(mc, neutral, speed)
+
+    threading.Thread(target=routine, daemon=True).start()
+    return jsonify({"ok": True, "neutral_angles": neutral})
+
+
+@app.route("/api/wave_camera/stop", methods=["POST"])
+def api_wave_camera_stop():
+    global wave_cancel_event, wave_active, wave_status
+    wave_cancel_event.set()
+    wave_active = False
+    wave_status = {"active": False, "stage": "cancelled"}
+    return jsonify({"ok": True})
+
+
+@app.route("/api/wave_camera/status")
+def api_wave_camera_status():
+    return jsonify({"ok": True, "active": wave_active, "status": wave_status})
+
+
 # ── HTML ─────────────────────────────────────────────────────────
 
 HTML = """<!DOCTYPE html>
@@ -1585,6 +1728,92 @@ HTML = """<!DOCTYPE html>
       <button class="btn primary" onclick="doDance()">Dance</button>
       <button class="btn primary" onclick="doFistBump()">Fist Bump</button>
       <button class="btn" onclick="sendAngles([0,0,0,0])">Home</button>
+    </div>
+  </div>
+
+  <!-- Wave to Camera -->
+  <div class="panel full" style="border: 1px solid #2a2a5a; background: linear-gradient(135deg, #12122a 0%, #171738 100%);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+      <h2 style="margin: 0; color: #50fa7b;">👋 Wave to Camera</h2>
+      <span style="font-size: 11px; background: #1a1a3a; border: 1px solid #3a3a6a; color: #50fa7b; padding: 3px 8px; border-radius: 4px; font-family: monospace;">
+        Key Toggle: <strong>[W]</strong>
+      </span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+      <!-- Column 1: Configuration -->
+      <div>
+        <!-- Neutral State Selection -->
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 12px; color: #8888bb; display: block; margin-bottom: 4px;">Neutral State Position:</label>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+            <select id="waveNeutralPreset" onchange="onWaveNeutralPresetChange()" style="flex: 1; min-width: 150px;">
+              <option value="default">Default [-9, 45, -57, 43]</option>
+              <option value="home">Home [-9, 45, -57, 43]</option>
+              <option value="look_user">Looking at User [-33, -2, -72, 43]</option>
+              <option value="sleep">Sleep [-14, 38, -31, 36]</option>
+              <option value="custom">Custom Angles</option>
+            </select>
+            <button class="btn small primary" onclick="captureCurrentAsNeutral()">Capture Current</button>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap;">
+            <span style="font-size: 11px; color: #555;">Neutral:</span>
+            <input type="number" id="wn_j1" value="-9" class="joint-input" style="width: 50px;" title="J1">
+            <input type="number" id="wn_j2" value="45" class="joint-input" style="width: 50px;" title="J2">
+            <input type="number" id="wn_j3" value="-57" class="joint-input" style="width: 50px;" title="J3">
+            <input type="number" id="wn_j4" value="43" class="joint-input" style="width: 50px;" title="J4">
+            <button class="btn small" onclick="testNeutralPos()">Move to Neutral</button>
+          </div>
+        </div>
+
+        <!-- Countdown & Hotkey Settings -->
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 12px; color: #8888bb; display: block; margin-bottom: 4px;">Countdown Timer:</label>
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <button class="btn small" onclick="setWaveCountdown(0)">0s</button>
+            <button class="btn small" onclick="setWaveCountdown(3)">3s</button>
+            <button class="btn small" onclick="setWaveCountdown(5)">5s</button>
+            <button class="btn small" onclick="setWaveCountdown(10)">10s</button>
+            <input type="number" id="waveCountdownSec" min="0" max="60" value="3" style="width: 55px;" class="joint-input">
+            <span style="font-size: 12px; color: #8888bb;">sec</span>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <label style="font-size: 12px; color: #8888bb; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="waveKeyEnabled" checked>
+            Enable Key Toggle (Press <strong>W</strong> to start or cancel)
+          </label>
+        </div>
+      </div>
+
+      <!-- Column 2: Trigger & Live Action Display -->
+      <div style="display: flex; flex-direction: column; justify-content: space-between; background: #0c0c1f; border: 1px solid #1a1a3a; border-radius: 8px; padding: 12px;">
+        <div>
+          <div style="font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">
+            Sequence: Neutral [-9, 45, -57, 43] → J2=-2, J3=-92 → J1=162 → J2 Up/Down 15-20° (Wave) → Return
+          </div>
+
+          <!-- Countdown Big Indicator -->
+          <div id="waveCountdownBanner" style="display: none; text-align: center; margin: 10px 0; padding: 10px; background: rgba(80, 250, 123, 0.1); border: 1px solid rgba(80, 250, 123, 0.3); border-radius: 6px;">
+            <div style="font-size: 11px; color: #50fa7b; text-transform: uppercase; letter-spacing: 1px;">Get Ready</div>
+            <div id="waveCountdownNum" style="font-size: 36px; font-weight: bold; color: #50fa7b; font-family: monospace; line-height: 1.2;">3</div>
+            <div style="font-size: 11px; color: #8888bb;">Press <strong>W</strong> or Cancel to abort</div>
+          </div>
+        </div>
+
+        <div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="btn green" id="waveActionBtn" onclick="toggleWaveCamera()" style="flex: 1; padding: 10px; font-size: 13px; font-weight: bold;">
+              👋 Wave to Camera [W]
+            </button>
+            <button class="btn" id="waveCancelBtn" onclick="cancelWaveCamera()" style="display: none; padding: 10px 16px; font-size: 13px; background: #e94560; border-color: #e94560; color: white;">
+              Cancel
+            </button>
+          </div>
+          <div class="readout" id="waveStatusText" style="margin-top: 8px; color: #8888bb;">Ready. Press W or click button to start.</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1923,6 +2152,231 @@ function doDance() { fetch("/api/dance", {method:"POST",headers:{"Content-Type":
 function doFistBump() { fetch("/api/fistbump", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({speed:parseInt(document.getElementById("speedSlider").value)})}); setReadout("Fist bump..."); }
 
 function setReadout(msg) { document.getElementById("readout").textContent = msg; }
+
+// ── Wave to Camera JS ──────────────────────────────────────────
+let waveCountdownTimer = null;
+let isWaveCountingDown = false;
+let isWaveExecuting = false;
+let waveRemainingSec = 0;
+
+function setWaveCountdown(sec) {
+  document.getElementById("waveCountdownSec").value = sec;
+}
+
+function onWaveNeutralPresetChange() {
+  const val = document.getElementById("waveNeutralPreset").value;
+  if (val === "default" || val === "home") {
+    setNeutralInputs([-9, 45, -57, 43]);
+  } else if (val === "look_user") {
+    setNeutralInputs([-33, -2, -72, 43]);
+  } else if (val === "sleep") {
+    setNeutralInputs([-14, 38, -31, 36]);
+  }
+}
+
+function setNeutralInputs(angles) {
+  document.getElementById("wn_j1").value = Math.round(angles[0]);
+  document.getElementById("wn_j2").value = Math.round(angles[1]);
+  document.getElementById("wn_j3").value = Math.round(angles[2]);
+  document.getElementById("wn_j4").value = Math.round(angles[3]);
+}
+
+function getNeutralAngles() {
+  return [
+    parseFloat(document.getElementById("wn_j1").value) || 0,
+    parseFloat(document.getElementById("wn_j2").value) || 0,
+    parseFloat(document.getElementById("wn_j3").value) || 0,
+    parseFloat(document.getElementById("wn_j4").value) || 0
+  ];
+}
+
+function captureCurrentAsNeutral() {
+  fetch("/api/angles").then(r => r.json()).then(d => {
+    if (d.angles && d.angles !== -1) {
+      setNeutralInputs(d.angles);
+      document.getElementById("waveNeutralPreset").value = "custom";
+      setWaveStatus("Captured current arm position as neutral state: [" + d.angles.map(v => Math.round(v)).join(", ") + "]");
+    } else {
+      setWaveStatus("Could not read current angles from arm");
+    }
+  }).catch(e => setWaveStatus("Error: " + e));
+}
+
+function testNeutralPos() {
+  const angles = getNeutralAngles();
+  sendAngles(angles);
+  setWaveStatus("Moved arm to neutral position: [" + angles.join(", ") + "]");
+}
+
+function setWaveStatus(msg) {
+  const el = document.getElementById("waveStatusText");
+  if (el) el.textContent = msg;
+}
+
+function toggleWaveCamera() {
+  if (isWaveCountingDown || isWaveExecuting) {
+    cancelWaveCamera();
+    return;
+  }
+  startWaveSequence();
+}
+
+function startWaveSequence() {
+  const sec = Math.max(0, parseInt(document.getElementById("waveCountdownSec").value) || 0);
+  if (sec === 0) {
+    executeWaveMotion();
+    return;
+  }
+
+  isWaveCountingDown = true;
+  waveRemainingSec = sec;
+
+  const banner = document.getElementById("waveCountdownBanner");
+  const numEl = document.getElementById("waveCountdownNum");
+  const actionBtn = document.getElementById("waveActionBtn");
+  const cancelBtn = document.getElementById("waveCancelBtn");
+
+  if (banner) banner.style.display = "block";
+  if (numEl) numEl.textContent = waveRemainingSec;
+  if (cancelBtn) cancelBtn.style.display = "inline-block";
+  if (actionBtn) {
+    actionBtn.textContent = "Cancel Countdown [W]";
+    actionBtn.classList.remove("green");
+    actionBtn.classList.add("primary");
+  }
+
+  setWaveStatus("Countdown: " + waveRemainingSec + "s remaining before waving...");
+
+  if (waveCountdownTimer) clearInterval(waveCountdownTimer);
+  waveCountdownTimer = setInterval(() => {
+    waveRemainingSec -= 1;
+    if (waveRemainingSec > 0) {
+      if (numEl) numEl.textContent = waveRemainingSec;
+      setWaveStatus("Countdown: " + waveRemainingSec + "s remaining...");
+    } else {
+      clearInterval(waveCountdownTimer);
+      waveCountdownTimer = null;
+      isWaveCountingDown = false;
+      if (banner) banner.style.display = "none";
+      executeWaveMotion();
+    }
+  }, 1000);
+}
+
+function executeWaveMotion() {
+  isWaveExecuting = true;
+  const actionBtn = document.getElementById("waveActionBtn");
+  const cancelBtn = document.getElementById("waveCancelBtn");
+  const banner = document.getElementById("waveCountdownBanner");
+
+  if (banner) banner.style.display = "none";
+  if (cancelBtn) cancelBtn.style.display = "inline-block";
+  if (actionBtn) {
+    actionBtn.textContent = "Cancel Wave [W]";
+    actionBtn.classList.remove("green");
+    actionBtn.classList.add("primary");
+  }
+
+  const neutral = getNeutralAngles();
+  const speed = parseInt(document.getElementById("speedSlider").value) || 40;
+
+  setWaveStatus("Waving to camera: J2=-2, J3=-92 -> J1=162 -> J2 wave 15-20° -> return...");
+
+  fetch("/api/wave_camera", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ neutral_angles: neutral, speed: speed })
+  }).then(r => r.json()).then(d => {
+    if (d.error) {
+      setWaveStatus("Wave Error: " + d.error);
+      resetWaveUI();
+    } else {
+      pollWaveStatus();
+    }
+  }).catch(e => {
+    setWaveStatus("Wave Error: " + e);
+    resetWaveUI();
+  });
+}
+
+function pollWaveStatus() {
+  const pollInterval = setInterval(() => {
+    fetch("/api/wave_camera/status").then(r => r.json()).then(d => {
+      if (!d.active) {
+        clearInterval(pollInterval);
+        resetWaveUI();
+        if (d.status && d.status.stage === "completed") {
+          setWaveStatus("Wave to camera completed successfully! Arm returned to neutral.");
+        } else if (d.status && d.status.stage === "cancelled") {
+          setWaveStatus("Wave sequence was cancelled.");
+        } else {
+          setWaveStatus("Wave sequence ended (" + (d.status ? d.status.stage : "idle") + ").");
+        }
+        readAngles();
+      } else {
+        if (d.status && d.status.stage) {
+          const stageMap = {
+            "moving_to_neutral": "Moving to neutral pose [-9, 45, -57, 43]...",
+            "tucking_j2_j3": "Moving J2 to -2° and J3 to -92°...",
+            "rotating_j1_162": "Rotating J1 to 162°...",
+            "waving_j2": "Moving J2 up & down 15-20° (Waving 👋)...",
+            "returning_to_neutral": "Returning smoothly to neutral..."
+          };
+          setWaveStatus(stageMap[d.status.stage] || d.status.stage);
+        }
+      }
+    }).catch(() => {
+      clearInterval(pollInterval);
+      resetWaveUI();
+    });
+  }, 300);
+}
+
+function cancelWaveCamera() {
+  if (waveCountdownTimer) {
+    clearInterval(waveCountdownTimer);
+    waveCountdownTimer = null;
+  }
+  isWaveCountingDown = false;
+  isWaveExecuting = false;
+
+  fetch("/api/wave_camera/stop", { method: "POST" });
+  resetWaveUI();
+  setWaveStatus("Wave to camera cancelled.");
+}
+
+function resetWaveUI() {
+  if (waveCountdownTimer) {
+    clearInterval(waveCountdownTimer);
+    waveCountdownTimer = null;
+  }
+  isWaveCountingDown = false;
+  isWaveExecuting = false;
+
+  const banner = document.getElementById("waveCountdownBanner");
+  const actionBtn = document.getElementById("waveActionBtn");
+  const cancelBtn = document.getElementById("waveCancelBtn");
+
+  if (banner) banner.style.display = "none";
+  if (cancelBtn) cancelBtn.style.display = "none";
+  if (actionBtn) {
+    actionBtn.textContent = "👋 Wave to Camera [W]";
+    actionBtn.classList.remove("primary");
+    actionBtn.classList.add("green");
+  }
+}
+
+// Global key shortcut listener for 'W'
+window.addEventListener("keydown", function(e) {
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+    return;
+  }
+  const enabled = document.getElementById("waveKeyEnabled") ? document.getElementById("waveKeyEnabled").checked : true;
+  if (enabled && (e.key === 'w' || e.key === 'W')) {
+    e.preventDefault();
+    toggleWaveCamera();
+  }
+});
 
 // Init — scan ports only, cameras scanned on demand to avoid OpenCV segfault
 scanPorts();

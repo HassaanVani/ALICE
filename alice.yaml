@@ -2,7 +2,7 @@
 # Adaptive Learning Interface for Cognitive Exploration
 
 mode: idle
-simulate: true
+simulate: false
 
 hardware:
   arm:
@@ -107,7 +107,7 @@ voice_input:
   max_record_s: 10.0
 
 llm_interpreter:
-  enabled: false
+  enabled: true
   model: "llama3.2:3b"
   base_url: "http://localhost:11434"
   interval_s: 4.0              # seconds between LLM modulation queries
@@ -122,7 +122,7 @@ sound_effects:
   intensity: 1.0              # servo vibration amplitude scale (0.0-1.0)
 
 living_behaviors:
-  enabled: false
+  enabled: true
   gaze_smoothing: 0.06        # EMA alpha — lower = smoother/slower tracking
   gaze_face_priority: 0.8     # face tracking priority vs objects
   curiosity_decay_rate: 0.005  # per-tick curiosity decay

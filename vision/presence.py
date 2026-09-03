@@ -86,29 +86,39 @@ class PresenceDetector:
         return self._simulate
 
     def start(self) -> bool:
-        """Initialize MediaPipe. Returns True on success."""
-        if not MP_AVAILABLE:
-            logger.warning("mediapipe not installed — presence detection in simulation mode")
-            self._simulate = True
-            return False
+        """Initialize MediaPipe or OpenCV face detection. Returns True on success."""
+        if MP_AVAILABLE and hasattr(mp, "solutions") and hasattr(mp.solutions, "face_detection"):
+            try:
+                self._face_detection = mp.solutions.face_detection.FaceDetection(
+                    model_selection=0,  # short-range model (< 2m, faster)
+                    min_detection_confidence=self._min_confidence,
+                )
+                logger.info("Presence detector started (MediaPipe Face Detection)")
+                return True
+            except Exception as e:
+                logger.debug(f"MediaPipe face detection init failed: {e}")
 
+        # Fallback to OpenCV Haar cascade (built-in, reliable)
         try:
-            self._face_detection = mp.solutions.face_detection.FaceDetection(
-                model_selection=0,  # short-range model (< 2m, faster)
-                min_detection_confidence=self._min_confidence,
-            )
-            logger.info("Presence detector started (MediaPipe Face Detection)")
-            return True
+            import cv2
+            cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+            self._cv_cascade = cv2.CascadeClassifier(cascade_path)
+            if not self._cv_cascade.empty():
+                logger.info("Presence detector started (OpenCV Haar Cascade)")
+                return True
         except Exception as e:
-            logger.error(f"Failed to start presence detector: {e}")
-            self._simulate = True
-            return False
+            logger.debug(f"OpenCV cascade init failed: {e}")
+
+        logger.warning("No face detector available — presence detection in simulation mode")
+        self._simulate = True
+        return False
 
     def stop(self) -> None:
-        """Release MediaPipe resources."""
+        """Release detection resources."""
         if self._face_detection is not None:
             self._face_detection.close()
             self._face_detection = None
+        self._cv_cascade = None
 
     def detect(self, frame: np.ndarray) -> PresenceInfo:
         """Process a frame and return presence information.
@@ -122,42 +132,59 @@ class PresenceDetector:
         if self._simulate:
             return self._simulate_detect(frame)
 
-        if self._face_detection is None:
+        if self._face_detection is None and getattr(self, "_cv_cascade", None) is None:
             self.start()
             if self._simulate:
                 return self._simulate_detect(frame)
 
         import cv2
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self._face_detection.process(rgb)
-
         now = time.time()
         faces: List[dict] = []
 
-        if results.detections:
-            h, w = frame.shape[:2]
-            for detection in results.detections:
-                bbox = detection.location_data.relative_bounding_box
-                face_width_px = bbox.width * w
-                face_center_x = (bbox.xmin + bbox.width / 2) * w
-                face_center_y = (bbox.ymin + bbox.height / 2) * h
+        if self._face_detection is not None:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self._face_detection.process(rgb)
 
-                # Rough distance estimate from face width
+            if results.detections:
+                h, w = frame.shape[:2]
+                for detection in results.detections:
+                    bbox = detection.location_data.relative_bounding_box
+                    face_width_px = bbox.width * w
+                    face_center_x = (bbox.xmin + bbox.width / 2) * w
+                    face_center_y = (bbox.ymin + bbox.height / 2) * h
+
+                    distance_cm = (
+                        self.REFERENCE_DISTANCE_CM
+                        * self.REFERENCE_FACE_WIDTH_PX
+                        / max(face_width_px, 1)
+                    )
+
+                    faces.append({
+                        "width_px": face_width_px,
+                        "center_x": face_center_x,
+                        "center_y": face_center_y,
+                        "distance_cm": distance_cm,
+                        "confidence": detection.score[0],
+                    })
+        elif getattr(self, "_cv_cascade", None) is not None:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            detected_faces = self._cv_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=4)
+            for (x, y, w_box, h_box) in detected_faces:
                 distance_cm = (
                     self.REFERENCE_DISTANCE_CM
                     * self.REFERENCE_FACE_WIDTH_PX
-                    / max(face_width_px, 1)
+                    / max(w_box, 1)
                 )
-
                 faces.append({
-                    "width_px": face_width_px,
-                    "center_x": face_center_x,
-                    "center_y": face_center_y,
+                    "width_px": float(w_box),
+                    "center_x": float(x + w_box / 2),
+                    "center_y": float(y + h_box / 2),
                     "distance_cm": distance_cm,
-                    "confidence": detection.score[0],
+                    "confidence": 0.85,
                 })
 
+        if faces:
             self._last_seen_time = now
 
         # Determine presence with timeout
