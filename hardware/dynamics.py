@@ -172,58 +172,60 @@ class MovementDynamics:
         # Move slowly — this should be barely perceptible
         self._arm.move_to(target, speed=15)
 
-    async def idle_wander(self, base_pose: Optional[Tuple[float, ...]] = None) -> None:
-        """ALICE organically wanders her surroundings — curious, unhurried, alive.
+    # Programmed panoramic sweep waypoints spanning the full 280°+ desk traversal
+    PANORAMIC_SWEEP_WAYPOINTS = (
+        (-140.0, 38.0, -62.0, 35.0),   # Far Left sector (West)
+        (-70.0, 42.0, -58.0, 40.0),    # Mid Left sector
+        (-9.0, 45.0, -57.0, 43.0),     # Center Home (User calibrated)
+        (70.0, 42.0, -58.0, 40.0),     # Mid Right sector
+        (140.0, 38.0, -62.0, 35.0),    # Far Right sector (East)
+    )
 
-        Drifts between points of interest across the desk using harmonic sine waves
-        with random lingering pauses and micro-noise.
+    async def idle_wander(self, base_pose: Optional[Tuple[float, ...]] = None) -> None:
+        """ALICE deliberately surveys her surroundings with full programmed traversal.
+
+        Sweeps smoothly across the entire desk from far left (-140°) to far right (+140°),
+        pausing with intention at each sector to perceive and integrate the environment.
         """
         now = time.time()
-        if not hasattr(self, "_wander_time"):
-            self._wander_time = 0.0
-            self._wander_pause_until = 0.0
-            self._next_wander_linger = now + random.uniform(4.0, 8.0)
+        if not hasattr(self, "_sweep_idx"):
+            self._sweep_idx = 2          # Start at center home
+            self._sweep_direction = 1    # 1 for forward (to right), -1 for reverse (to left)
+            self._sweep_pause_until = 0.0
 
-        if now < self._wander_pause_until:
+        # If currently dwelling at a sector to observe, hold
+        if now < self._sweep_pause_until:
             await asyncio.sleep(0.05)
             return
 
-        if now > self._next_wander_linger:
-            # Linger at this spot — like she spotted something interesting
-            linger_dur = random.uniform(1.2, 2.5)
-            self._wander_pause_until = now + linger_dur
-            self._next_wander_linger = now + linger_dur + random.uniform(5.0, 12.0)
-            await asyncio.sleep(0.05)
-            return
+        # Advance to next sector in programmed sequence
+        self._sweep_idx += self._sweep_direction
+        if self._sweep_idx >= len(self.PANORAMIC_SWEEP_WAYPOINTS):
+            self._sweep_idx = len(self.PANORAMIC_SWEEP_WAYPOINTS) - 2
+            self._sweep_direction = -1
+        elif self._sweep_idx < 0:
+            self._sweep_idx = 1
+            self._sweep_direction = 1
 
-        self._wander_time += 0.05
+        target = self.PANORAMIC_SWEEP_WAYPOINTS[self._sweep_idx]
+        if self._last_interest_angles is not None and self._sweep_idx == 2:
+            target = self._last_interest_angles
 
-        # Base angles to wander around
-        base = list(base_pose or ArmController.HOME_POSITION.as_tuple())
-
-        # Layered sine waves with varied prime periods
-        t = self._wander_time
-        j1_offset = 35.0 * math.sin(2 * math.pi * t / 9.0)
-        j2_offset = 10.0 * math.sin(2 * math.pi * t / 13.0 + 1.0)
-        j3_offset = 12.0 * math.sin(2 * math.pi * t / 15.0 + 2.0)
-        j4_offset = 16.0 * math.sin(2 * math.pi * t / 8.0 + 0.5)
-
-        # Micro noise for liveliness
-        noise_j1 = random.gauss(0, 0.4)
-        noise_j4 = random.gauss(0, 0.3)
-
-        target = (
-            max(-150.0, min(150.0, base[0] + j1_offset + noise_j1)),
-            max(-2.0, min(65.0, base[1] + j2_offset)),
-            max(-90.0, min(40.0, base[2] + j3_offset)),
-            max(-170.0, min(170.0, base[3] + j4_offset + noise_j4)),
-        )
-
-        speed = 22.0
+        # Smooth, deliberate traversal speed
+        speed = 26.0
         if self._llm_interpreter is not None:
             speed *= self._llm_interpreter.modifiers.spd
 
+        # Move arm to the new sector
         self._arm.move_to(target, speed=speed)
+
+        # Estimate travel time based on J1 angular distance + dwell observation pause
+        current = self._arm.position.as_tuple()
+        delta_deg = abs(target[0] - current[0])
+        travel_time = max(0.6, delta_deg / max(10.0, speed))
+        dwell_time = 2.0  # seconds to dwell at this sector and observe
+
+        self._sweep_pause_until = now + travel_time + dwell_time
 
     def set_interest_point(self, angles: Tuple[float, ...]) -> None:
         """Set the point ALICE's idle scanning should orient toward."""

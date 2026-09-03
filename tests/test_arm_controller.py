@@ -39,7 +39,7 @@ class TestArmController:
     def test_home(self, arm):
         result = arm.home()
         assert result is True
-        assert arm.position.as_tuple() == (-33, -2, -72, 43)
+        assert arm.position.as_tuple() == ArmController.HOME_POSITION.as_tuple()
 
     def test_move_to(self, arm):
         result = arm.move_to((45, 60, -30, 0))
